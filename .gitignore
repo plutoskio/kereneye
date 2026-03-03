@@ -1,39 +1,32 @@
-# Virtual environment
+# Environments
 venv/
-.venv/
+env/
+.env
 
-# Python
+# Python artifacts
 __pycache__/
-*.py[cod]
-*.egg-info/
-dist/
+*.pyc
+*.pyo
+*.pyd
+.Python
 build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
 *.egg
 
-# Jupyter
-.ipynb_checkpoints/
+# Output directories
+output/
 
-# Data (large files)
-data/*.csv
-data/*.h5
-data/*.hdf5
-data/*.parquet
-!data/.gitkeep
-
-# Models
-models/*.pkl
-models/*.joblib
-!models/.gitkeep
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# OS
+# macOS
 .DS_Store
-Thumbs.db
-
-# Environment
-.env
