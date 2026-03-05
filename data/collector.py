@@ -370,8 +370,27 @@ def _format_df_as_md_table(df: pd.DataFrame, key_rows: list, title: str) -> str:
     lines.append(divider)
 
     for row in key_rows:
+        actual_row = None
         if row in df.index:
-            vals = df.loc[row]
+            actual_row = row
+        else:
+            # Case-insensitive substring match fallback
+            for idx in df.index:
+                if row.lower() in str(idx).lower():
+                    actual_row = idx
+                    break
+            # Fallback for Total Revenue
+            if not actual_row and row == "Total Revenue":
+                for idx in df.index:
+                    if "revenue" in str(idx).lower():
+                        actual_row = idx
+                        break
+
+        if actual_row is not None:
+            vals = df.loc[actual_row]
+            if isinstance(vals, pd.DataFrame):
+                vals = vals.iloc[0]
+                
             row_data = [row.replace("Total ", "")] # Simplify row names slightly
             for val in vals:
                 if pd.isna(val):

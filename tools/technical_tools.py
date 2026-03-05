@@ -29,7 +29,7 @@ def compute_technical_indicators(price_df: pd.DataFrame) -> dict:
     indicators["current_price"] = close.iloc[-1]
 
     # Golden/Death cross
-    if indicators["sma_50"] and indicators["sma_200"]:
+    if pd.notna(indicators["sma_50"]) and pd.notna(indicators["sma_200"]):
         if indicators["sma_50"] > indicators["sma_200"]:
             indicators["ma_cross"] = "Golden Cross (bullish)"
         else:
@@ -41,7 +41,7 @@ def compute_technical_indicators(price_df: pd.DataFrame) -> dict:
     indicators["above_sma_50"] = close.iloc[-1] > indicators["sma_50"]
     indicators["above_sma_200"] = (
         close.iloc[-1] > indicators["sma_200"]
-        if indicators["sma_200"]
+        if pd.notna(indicators["sma_200"])
         else None
     )
 
@@ -111,8 +111,8 @@ def compute_technical_indicators(price_df: pd.DataFrame) -> dict:
     )
 
     # --- 52-week High/Low ---
-    indicators["high_52w"] = high.max()
-    indicators["low_52w"] = low.min()
+    indicators["high_52w"] = high.tail(252).max()
+    indicators["low_52w"] = low.tail(252).min()
     indicators["pct_from_52w_high"] = close.iloc[-1] / indicators["high_52w"] - 1
     indicators["pct_from_52w_low"] = close.iloc[-1] / indicators["low_52w"] - 1
 
