@@ -4,24 +4,32 @@
 
 @layer base {
   body {
-    @apply antialiased bg-[#0a0c10];
+    @apply antialiased bg-obsidian text-neutral-300 font-sans;
   }
 }
 
 @layer utilities {
-  .bg-grad-dark {
-    background: radial-gradient(circle at 50% 0%, #171b2d 0%, #0a0c10 100%);
+  .panel {
+    @apply bg-obsidian border border-borderline rounded-precision;
   }
 
-  .glass-panel {
-    @apply bg-white/[0.02] border border-white/5 backdrop-blur-md rounded-2xl shadow-xl;
+  .tabular-data {
+    font-variant-numeric: tabular-nums;
   }
 
-  .animate-fade-in-up {
-    animation: fadeInUp 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  /* Shimmer Loading Skeleton */
+  .skeleton {
+    @apply bg-borderline relative overflow-hidden;
   }
 
-  /* Custom Scrollbar */
+  .skeleton::after {
+    content: '';
+    @apply absolute inset-0 -translate-x-full;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.04), transparent);
+    animation: shimmer 1.5s infinite;
+  }
+
+  /* Custom Precision Scrollbar */
   .custom-scrollbar::-webkit-scrollbar {
     width: 6px;
   }
@@ -31,27 +39,21 @@
   }
 
   .custom-scrollbar::-webkit-scrollbar-thumb {
-    @apply bg-white/10 rounded-full;
+    @apply bg-neutral-800 rounded-none;
   }
 
   .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-    @apply bg-white/20;
+    @apply bg-neutral-700;
   }
 }
 
-@keyframes fadeInUp {
-  from {
-    opacity: 0;
-    transform: translateY(20px);
-  }
-
-  to {
-    opacity: 1;
-    transform: translateY(0);
+@keyframes shimmer {
+  100% {
+    transform: translateX(100%);
   }
 }
 
-/* Recharts overrides to remove focus outline */
+/* Remove default focus outlines on charts */
 .recharts-wrapper {
   outline: none;
 }

@@ -81,11 +81,13 @@ async def get_company_data(ticker: str):
 async def get_research_report(ticker: str):
     """
     Triggers the CrewAI agent orchestration to generate the equity research report.
-    Returns the final markdown.
+    Returns the final markdown. Always re-runs the agents to ensure fresh analysis if 
+    the user queries it again.
     """
     ticker = ticker.upper()
     
-    # Retrieve from cache if available, else fetch it
+    # Check if we already have the raw data cached from the /company endpoint
+    # to save time calling YFinance again.
     if ticker in _cache:
         data = _cache[ticker]
     else:
@@ -96,6 +98,7 @@ async def get_research_report(ticker: str):
             raise HTTPException(status_code=404, detail="Company data not found")
 
     # Run the heavy CrewAI logic in a background async worker
+    # We never cache the final report string, so querying twice gives a fresh generation.
     report_markdown = await asyncer.asyncify(run_research_crew)(data)
     
     return {"report": report_markdown}
