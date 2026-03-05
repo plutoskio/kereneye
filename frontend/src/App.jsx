@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import ReactMarkdown from 'react-markdown';
 import { Search, ShieldAlert } from 'lucide-react';
+import Background3D from './Background3D';
 import './index.css';
 
 function App() {
@@ -106,11 +107,14 @@ function App() {
       <main className="flex-1 w-full max-w-[1600px] mx-auto p-8">
         {!companyData && !loadingInitial ? (
           // LANDING STATE
-          <div className="h-[60vh] flex flex-col items-center justify-center animate-fade-in-up text-center">
-            <h2 className="text-4xl font-semibold tracking-tight text-altruistDark mb-4">Advisory Intelligence.</h2>
-            <p className="text-altruistGray-500 text-[16px] leading-relaxed max-w-md">
-              Enter a ticker symbol to access high-fidelity institutional data and AI-generated equity research reports.
-            </p>
+          <div className="relative h-[80vh] flex flex-col items-center justify-center animate-fade-in-up text-center w-full rounded-sm overflow-hidden">
+            <Background3D />
+            <div className="relative z-10 flex flex-col items-center justify-center pointer-events-none p-12 bg-altruistWhite/80 backdrop-blur-md rounded-lg shadow-sm border border-altruistGray-200">
+              <h2 className="text-[44px] font-semibold tracking-tight text-altruistDark mb-4">Advisory Intelligence.</h2>
+              <p className="text-altruistGray-600 text-[17px] leading-relaxed max-w-lg font-medium">
+                Enter a ticker symbol to access high-fidelity institutional data and AI-generated equity research reports.
+              </p>
+            </div>
           </div>
         ) : (
           // DASHBOARD GRID
