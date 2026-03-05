@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
+import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import ReactMarkdown from 'react-markdown';
-import { Search, TrendingUp, Sparkles, AlertCircle } from 'lucide-react';
+import { Search, ShieldAlert } from 'lucide-react';
 import './index.css';
 
 function App() {
@@ -16,7 +16,7 @@ function App() {
   const fetchCompanyData = async (symbol) => {
     try {
       const res = await fetch(`http://localhost:8000/api/company/${symbol}`);
-      if (!res.ok) throw new Error("We couldn't find that company. Please check the ticker symbol.");
+      if (!res.ok) throw new Error('Company not found. Please verify the ticker.');
       const data = await res.json();
       setCompanyData(data);
     } catch (err) {
@@ -29,7 +29,7 @@ function App() {
     try {
       setLoadingReport(true);
       const res = await fetch(`http://localhost:8000/api/research/${symbol}`);
-      if (!res.ok) throw new Error("We ran into an issue generating your report.");
+      if (!res.ok) throw new Error('Failed to generate report.');
       const data = await res.json();
       setReport(data.report);
     } catch (err) {
@@ -50,11 +50,9 @@ function App() {
 
     const symbol = ticker.trim().toUpperCase();
 
-    // Fetch fast structural data
     await fetchCompanyData(symbol);
     setLoadingInitial(false);
 
-    // Trigger AI writing
     if (!error) {
       fetchResearchReport(symbol);
     }
@@ -70,179 +68,185 @@ function App() {
 
   const formatPct = (val) => {
     if (val === undefined || val === null) return '—';
-    return `${(val * 100).toFixed(1)}%`;
+    return `${(val * 100).toFixed(2)}%`;
   };
 
   return (
-    <div className="min-h-screen flex flex-col selection:bg-primary-100 selection:text-primary-700">
-
-      {/* NAVIGATION BAR (Active State) */}
-      <header className={`transition-all duration-700 ease-in-out w-full
-        ${companyData ? 'nav-blur sticky top-0 z-50 py-4 px-6 sm:px-10 flex flex-col sm:flex-row sm:items-center justify-between gap-4' :
-          'pt-32 pb-12 px-6 flex flex-col items-center justify-center'}`}>
-
-        <div className={`flex items-center gap-3 ${!companyData && 'mb-8'}`}>
-          <div className="w-10 h-10 bg-primary-100 text-primary-600 rounded-xl flex items-center justify-center shadow-sm">
-            <TrendingUp strokeWidth={2.5} className="w-6 h-6" />
-          </div>
-          <h1 className="text-2xl font-bold tracking-tight text-text-main">KerenEye</h1>
+    <div className="min-h-screen bg-altruistGray-50 text-altruistGray-900 font-sans flex flex-col">
+      {/* GLOBAL HEADER */}
+      <header className="border-b border-altruistGray-200 bg-altruistWhite px-8 h-16 sticky top-0 z-50 flex items-center justify-between shadow-sm">
+        <div className="flex items-center gap-6">
+          <h1 className="text-xl font-bold tracking-tight text-altruistDark">KerenEye</h1>
         </div>
 
-        {!companyData && (
-          <div className="text-center max-w-xl mx-auto mb-10 space-y-3">
-            <h2 className="text-4xl sm:text-5xl font-extrabold tracking-tight text-text-main">Understand any stock,<br />instantly.</h2>
-            <p className="text-lg text-text-muted">Enter a ticker symbol below and let our AI agents write a comprehensive, easy-to-read financial research report just for you.</p>
+        <form onSubmit={handleSearch} className="flex items-center">
+          <div className="relative flex items-center">
+            <Search className="w-5 h-5 text-altruistGray-400 absolute left-3" />
+            <input
+              type="text"
+              placeholder="Search ticker"
+              value={ticker}
+              onChange={(e) => setTicker(e.target.value)}
+              disabled={loadingInitial}
+              className="bg-altruistGray-50 border border-altruistGray-200 rounded-sm pl-10 pr-4 py-2 text-[14px] font-medium uppercase text-altruistDark placeholder-altruistGray-400 focus:outline-none focus:border-altruistBlue focus:bg-altruistWhite transition-colors w-64 disabled:opacity-50"
+            />
           </div>
-        )}
-
-        <form onSubmit={handleSearch} className={`relative group ${companyData ? 'w-full sm:w-96' : 'w-full max-w-lg mx-auto'}`}>
-          <div className="absolute inset-y-0 left-4 flex items-center pointer-events-none">
-            <Search className="w-5 h-5 text-text-soft" />
-          </div>
-          <input
-            type="text"
-            placeholder="Search Apple, Tesla, etc. (AAPL, TSLA)"
-            value={ticker}
-            onChange={(e) => setTicker(e.target.value)}
-            disabled={loadingInitial}
-            className={`w-full bg-surface border border-borderline/80 focus:border-primary-500 focus:ring-4 focus:ring-primary-500/10 rounded-full pl-12 pr-24 py-3 sm:py-4 text-text-main placeholder:text-text-soft outline-none transition-all shadow-sm ${loadingInitial && 'opacity-70'}`}
-          />
-          <button
-            type="submit"
-            disabled={loadingInitial || !ticker.trim()}
-            className="absolute right-2 top-2 bottom-2 bg-primary-600 hover:bg-primary-700 text-white px-5 rounded-full font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-sm text-sm"
-          >
-            {loadingInitial ? 'Searching...' : 'Analyze'}
-          </button>
         </form>
       </header>
 
       {/* ERROR FEEDBACK */}
-      {error && !companyData && (
-        <div className="max-w-lg mx-auto mt-6 flex items-center gap-3 text-red-600 bg-red-50 px-5 py-4 rounded-friendly border border-red-100">
-          <AlertCircle className="w-5 h-5 shrink-0" />
-          <p className="font-medium text-sm">{error}</p>
+      {error && (
+        <div className="w-full bg-red-50 border-b border-red-200 py-3 px-8 flex items-center gap-3 text-red-700 text-[13px] font-medium">
+          <ShieldAlert className="w-4 h-4" />
+          {error}
         </div>
       )}
 
       {/* MAIN LAYOUT */}
-      <main className="flex-1 w-full p-4 sm:p-8 max-w-[1400px] mx-auto">
-        {companyData && (
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 sm:gap-8 animate-fade-in-up">
+      <main className="flex-1 w-full max-w-[1600px] mx-auto p-8">
+        {!companyData && !loadingInitial ? (
+          // LANDING STATE
+          <div className="h-[60vh] flex flex-col items-center justify-center animate-fade-in-up text-center">
+            <h2 className="text-4xl font-semibold tracking-tight text-altruistDark mb-4">Advisory Intelligence.</h2>
+            <p className="text-altruistGray-500 text-[16px] leading-relaxed max-w-md">
+              Enter a ticker symbol to access high-fidelity institutional data and AI-generated equity research reports.
+            </p>
+          </div>
+        ) : (
+          // DASHBOARD GRID
+          <div className="grid grid-cols-1 xl:grid-cols-12 gap-8 animate-fade-in-up items-start">
 
             {/* LEFT COLUMN: Data & Stats (7 cols) */}
-            <div className="col-span-1 lg:col-span-7 flex flex-col gap-6 sm:gap-8">
+            <div className="xl:col-span-7 flex flex-col gap-6">
 
-              {/* Header Card */}
-              <div className="card p-6 sm:p-8">
-                <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
+              {/* HEADER INFO */}
+              <div className="flex justify-between items-end mb-2">
+                {loadingInitial ? (
+                  <div className="space-y-2">
+                    <div className="skeleton h-10 w-64 rounded-sm" />
+                    <div className="skeleton h-4 w-48 rounded-sm" />
+                  </div>
+                ) : (
                   <div>
-                    <div className="flex items-center gap-3 mb-1">
-                      <h2 className="text-3xl sm:text-4xl font-bold text-text-main tracking-tight">{companyData.name}</h2>
-                      <span className="bg-gray-100 text-gray-600 px-3 py-1 rounded-full text-sm font-semibold tracking-wide">{companyData.ticker}</span>
-                    </div>
-                    <p className="text-text-muted font-medium">{companyData.sector} • {companyData.industry}</p>
+                    <h2 className="text-[32px] leading-tight font-semibold text-altruistDark tracking-tight mb-1">{companyData.name} <span className="text-altruistGray-400 font-mono text-[24px] ml-2">{companyData.ticker}</span></h2>
+                    <p className="text-[14px] text-altruistGray-500 font-medium">{companyData.sector} &mdash; {companyData.industry}</p>
                   </div>
-                  <div className="sm:text-right">
-                    <p className="text-4xl sm:text-5xl font-bold text-text-main tracking-tight">${companyData.current_price?.toFixed(2)}</p>
-                    <p className="text-text-muted mt-1 font-medium">Current Price</p>
+                )}
+                {loadingInitial ? (
+                  <div className="skeleton h-12 w-32 rounded-sm" />
+                ) : (
+                  <div className="text-right">
+                    <p className="text-[40px] leading-tight font-mono font-medium text-altruistDark tabular-nums">${companyData.current_price?.toFixed(2)}</p>
                   </div>
-                </div>
+                )}
               </div>
 
-              {/* Chart Panel */}
-              <div className="card p-6 sm:p-8 h-[400px] flex flex-col">
-                <h3 className="text-lg font-bold text-text-main mb-6">5-Year Performance</h3>
-                <div className="flex-1 min-h-0 -ml-4 -mr-4 sm:-mr-8">
-                  {companyData.price_history && companyData.price_history.length > 0 ? (
+              {/* CHART FOCUS PANEL */}
+              <div className="panel-structured h-[480px] flex flex-col">
+                <div className="border-b border-altruistGray-200 px-6 py-4 bg-altruistWhite">
+                  <h3 className="text-[13px] font-bold text-altruistGray-800 uppercase tracking-wide">5-Year Equity Performance</h3>
+                </div>
+                <div className="flex-1 min-h-0 p-6 pt-8">
+                  {loadingInitial ? (
+                    <div className="skeleton h-full w-full rounded-sm" />
+                  ) : companyData.price_history && companyData.price_history.length > 0 ? (
                     <ResponsiveContainer width="100%" height="100%">
-                      <AreaChart data={companyData.price_history} margin={{ top: 10, right: 0, bottom: 0, left: 0 }}>
-                        <defs>
-                          <linearGradient id="colorPrice" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.2} />
-                            <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
-                          </linearGradient>
-                        </defs>
+                      <LineChart data={companyData.price_history} margin={{ top: 5, right: 0, bottom: 0, left: -20 }}>
                         <XAxis dataKey="date" hide={true} />
-                        <YAxis domain={['auto', 'auto']} hide={true} />
+                        <YAxis hide={true} domain={['auto', 'auto']} />
                         <Tooltip
-                          contentStyle={{ backgroundColor: '#ffffff', border: 'none', borderRadius: '12px', boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1)', color: '#1F2937', fontWeight: '600' }}
-                          itemStyle={{ color: '#2563EB', fontWeight: '700' }}
+                          contentStyle={{ backgroundColor: '#ffffff', border: '1px solid #E5E7EB', borderRadius: '4px', color: '#111827', fontFamily: 'monospace', fontSize: '13px', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)' }}
+                          itemStyle={{ color: '#1565C0', fontWeight: '600' }}
                           formatter={(value) => [`$${value.toFixed(2)}`, "Price"]}
-                          labelStyle={{ color: '#6B7280', marginBottom: '4px', fontSize: '12px', fontWeight: '500' }}
+                          labelStyle={{ color: '#6B7280', marginBottom: '4px' }}
                         />
-                        <Area type="monotone" dataKey="price" stroke="#3b82f6" strokeWidth={3} fillOpacity={1} fill="url(#colorPrice)" activeDot={{ r: 6, fill: '#ffffff', stroke: '#3b82f6', strokeWidth: 3 }} />
-                      </AreaChart>
+                        <Line type="monotone" dataKey="price" stroke="#1565C0" strokeWidth={3} dot={false} activeDot={{ r: 5, fill: '#1565C0', stroke: '#ffffff', strokeWidth: 2 }} isAnimationActive={false} />
+                      </LineChart>
                     </ResponsiveContainer>
                   ) : (
-                    <div className="h-full flex items-center justify-center text-text-muted font-medium bg-gray-50 rounded-2xl mx-4 sm:mx-8">No performance data available</div>
+                    <div className="h-full flex items-center justify-center text-altruistGray-400 font-mono text-sm uppercase">Data Unavailable</div>
                   )}
                 </div>
               </div>
 
-              {/* Stats Grid */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                {[
-                  { label: "Market Cap", value: formatCurrency(companyData.market_cap) },
-                  { label: "P/E Ratio", value: companyData.ratios?.trailingPE?.toFixed(2) || '—' },
-                  { label: "EV / EBITDA", value: companyData.ratios?.enterpriseToEbitda?.toFixed(2) || '—' },
-                  { label: "Price / Book", value: companyData.ratios?.priceToBook?.toFixed(2) || '—' },
-                  { label: "Net Margin", value: formatPct(companyData.ratios?.profitMargins) },
-                  { label: "Operating Margin", value: formatPct(companyData.ratios?.operatingMargins) },
-                  { label: "Return on Equity", value: formatPct(companyData.ratios?.returnOnEquity) },
-                  { label: "Rev Growth", value: formatPct(companyData.ratios?.revenueGrowth) },
-                ].map((stat, i) => (
-                  <div key={i} className="card p-5 flex flex-col justify-center">
-                    <p className="text-text-muted text-sm font-medium mb-1">{stat.label}</p>
-                    <p className="text-xl sm:text-2xl font-bold text-text-main">{stat.value}</p>
-                  </div>
-                ))}
+              {/* STATS DOSSIER */}
+              <div className="panel-structured overflow-hidden">
+                <div className="border-b border-altruistGray-200 px-6 py-4 bg-altruistGray-50">
+                  <h3 className="text-[13px] font-bold text-altruistGray-800 uppercase tracking-wide">Fundamental Metrics</h3>
+                </div>
+                <div className="p-0">
+                  {loadingInitial ? (
+                    <div className="grid grid-cols-2">
+                      {[...Array(8)].map((_, i) => (
+                        <div key={i} className="flex justify-between px-6 py-4 border-b border-altruistGray-200 even:border-l">
+                          <div className="skeleton h-4 w-24 rounded-sm" />
+                          <div className="skeleton h-4 w-16 rounded-sm" />
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2">
+                      {[
+                        { label: "Market Cap", value: formatCurrency(companyData.market_cap) },
+                        { label: "P/E (TTM)", value: companyData.ratios?.trailingPE?.toFixed(2) || '—' },
+                        { label: "EV/EBITDA", value: companyData.ratios?.enterpriseToEbitda?.toFixed(2) || '—' },
+                        { label: "Price / Book", value: companyData.ratios?.priceToBook?.toFixed(2) || '—' },
+                        { label: "Net Margin", value: formatPct(companyData.ratios?.profitMargins) },
+                        { label: "Operating Margin", value: formatPct(companyData.ratios?.operatingMargins) },
+                        { label: "Return on Equity", value: formatPct(companyData.ratios?.returnOnEquity) },
+                        { label: "Revenue Growth", value: formatPct(companyData.ratios?.revenueGrowth) },
+                      ].map((stat, i) => (
+                        <div key={i} className="flex flex-col px-6 py-4 border-b border-altruistGray-200 sm:even:border-l hover:bg-altruistGray-50 transition-colors">
+                          <span className="text-altruistGray-500 text-[12px] font-bold uppercase tracking-wide mb-1">{stat.label}</span>
+                          <span className="font-mono text-altruistDark font-medium tabular-nums text-[16px]">{stat.value}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
 
             {/* RIGHT COLUMN: AI Report (5 cols) */}
-            <div className="col-span-1 lg:col-span-5 relative">
-              <div className="card h-full lg:h-[calc(100vh-8rem)] flex flex-col overflow-hidden lg:sticky lg:top-24">
-                <div className="border-b border-borderline/60 p-6 flex flex-col sm:flex-row gap-4 sm:gap-0 justify-between sm:items-center bg-surface z-10">
-                  <div className="flex items-center gap-2">
-                    <Sparkles className="w-5 h-5 text-primary-500" />
-                    <h3 className="text-lg font-bold text-text-main">AI Financial Insights</h3>
-                  </div>
+            <div className="xl:col-span-5 relative">
+              <div className="panel-structured h-full xl:h-[calc(100vh-8rem)] flex flex-col overflow-hidden xl:sticky xl:top-24 bg-altruistWhite">
+                <div className="border-b border-altruistGray-200 px-6 py-4 flex justify-between items-center bg-altruistGray-50 z-10">
+                  <h3 className="text-[13px] font-bold text-altruistGray-800 uppercase tracking-wide">Executive Dossier</h3>
                   {loadingReport && (
-                    <span className="text-primary-600 bg-primary-50 text-xs font-semibold px-3 py-1.5 rounded-full flex items-center gap-2 w-fit">
-                      <div className="w-1.5 h-1.5 bg-primary-500 animate-pulse rounded-full" />
-                      Analyzing data...
+                    <span className="text-altruistBlue text-[12px] font-medium flex items-center gap-2">
+                      <div className="w-2 h-2 bg-altruistBlue animate-pulse rounded-full" />
+                      Generating Analysis...
                     </span>
                   )}
                 </div>
 
-                <div className="p-6 sm:p-8 overflow-y-auto custom-scrollbar flex-1 bg-gray-50/30">
+                <div className="p-8 overflow-y-auto custom-scrollbar flex-1">
                   {report ? (
-                    <div className="prose prose-slate max-w-none text-[15px] sm:text-[16px]">
+                    <div className="prose prose-slate max-w-none text-[15px] leading-relaxed
+                                    prose-headings:font-bold prose-headings:tracking-tight
+                                    prose-h1:text-[22px] prose-h2:text-[18px] prose-h2:text-altruistDark prose-h2:mt-8 prose-h2:mb-4 prose-h2:pb-2 prose-h2:border-b prose-h2:border-altruistGray-200
+                                    prose-p:text-altruistGray-800 prose-li:text-altruistGray-800
+                                    prose-hr:border-altruistGray-200 prose-a:text-altruistBlue">
                       <ReactMarkdown>{report}</ReactMarkdown>
                     </div>
-                  ) : loadingReport ? (
-                    <div className="w-full space-y-8 py-4">
-                      <div className="pulse-soft h-8 w-3/4" />
+                  ) : loadingReport || loadingInitial ? (
+                    <div className="w-full space-y-8">
+                      <div className="skeleton h-8 w-3/4 rounded-sm" />
                       <div className="space-y-3">
-                        <div className="pulse-soft h-4 w-full" />
-                        <div className="pulse-soft h-4 w-full" />
-                        <div className="pulse-soft h-4 w-5/6" />
+                        <div className="skeleton h-4 w-full rounded-sm" />
+                        <div className="skeleton h-4 w-full rounded-sm" />
+                        <div className="skeleton h-4 w-5/6 rounded-sm" />
                       </div>
-                      <div className="pulse-soft h-6 w-1/2 mt-10" />
+                      <div className="skeleton h-6 w-1/2 rounded-sm mt-10" />
                       <div className="space-y-3">
-                        <div className="pulse-soft h-4 w-full" />
-                        <div className="pulse-soft h-4 w-11/12" />
-                        <div className="pulse-soft h-4 w-full" />
+                        <div className="skeleton h-4 w-full rounded-sm" />
+                        <div className="skeleton h-4 w-11/12 rounded-sm" />
+                        <div className="skeleton h-4 w-full rounded-sm" />
                       </div>
                     </div>
                   ) : (
-                    <div className="h-full flex flex-col items-center justify-center text-center space-y-4 py-12">
-                      <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mb-2">
-                        <Sparkles className="w-8 h-8 text-gray-400" />
-                      </div>
-                      <p className="text-lg font-semibold text-text-main">Ready to analyze.</p>
-                      <p className="text-text-muted max-w-xs mx-auto">Our AI agents read balance sheets, recent news, and technicals to write a friendly, comprehensive report.</p>
+                    <div className="h-full flex flex-col items-center justify-center text-altruistGray-400">
+                      <p className="text-[13px] font-medium uppercase tracking-widest text-center">Analysis pending<br />Search a ticker to synthesize report</p>
                     </div>
                   )}
                 </div>

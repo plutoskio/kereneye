@@ -4,29 +4,32 @@
 
 @layer base {
   body {
-    @apply antialiased bg-background text-text-main font-sans;
+    @apply antialiased bg-altruistGray-50 text-altruistGray-900 font-sans selection:bg-altruistBlue selection:text-white;
   }
 }
 
 @layer utilities {
-  .card {
-    @apply bg-surface border border-borderline/50 rounded-friendly shadow-soft transition-shadow duration-300;
+  .panel-structured {
+    @apply bg-altruistWhite border border-altruistGray-200 shadow-sm rounded-sm;
   }
 
-  .card:hover {
-    @apply shadow-float border-borderline;
+  .tabular-data {
+    font-variant-numeric: tabular-nums;
   }
 
-  .nav-blur {
-    @apply bg-surface/80 backdrop-blur-lg border-b border-borderline/50;
+  /* Shimmer Loading Skeleton */
+  .skeleton {
+    @apply bg-altruistGray-100 relative overflow-hidden;
   }
 
-  /* Soft Loading Pulse */
-  .pulse-soft {
-    @apply bg-gray-200 animate-pulse rounded-full;
+  .skeleton::after {
+    content: '';
+    @apply absolute inset-0 -translate-x-full;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.5), transparent);
+    animation: shimmer 1.5s infinite;
   }
 
-  /* Custom Clean Scrollbar */
+  /* Custom Precision Scrollbar */
   .custom-scrollbar::-webkit-scrollbar {
     width: 6px;
   }
@@ -36,11 +39,17 @@
   }
 
   .custom-scrollbar::-webkit-scrollbar-thumb {
-    @apply bg-gray-200 rounded-full;
+    @apply bg-altruistGray-300 rounded-sm;
   }
 
   .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-    @apply bg-gray-300;
+    @apply bg-altruistGray-400;
+  }
+}
+
+@keyframes shimmer {
+  100% {
+    transform: translateX(100%);
   }
 }
 
