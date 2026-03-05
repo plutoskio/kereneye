@@ -4,32 +4,29 @@
 
 @layer base {
   body {
-    @apply antialiased bg-obsidian text-neutral-300 font-sans;
+    @apply antialiased bg-background text-text-main font-sans;
   }
 }
 
 @layer utilities {
-  .panel {
-    @apply bg-obsidian border border-borderline rounded-precision;
+  .card {
+    @apply bg-surface border border-borderline/50 rounded-friendly shadow-soft transition-shadow duration-300;
   }
 
-  .tabular-data {
-    font-variant-numeric: tabular-nums;
+  .card:hover {
+    @apply shadow-float border-borderline;
   }
 
-  /* Shimmer Loading Skeleton */
-  .skeleton {
-    @apply bg-borderline relative overflow-hidden;
+  .nav-blur {
+    @apply bg-surface/80 backdrop-blur-lg border-b border-borderline/50;
   }
 
-  .skeleton::after {
-    content: '';
-    @apply absolute inset-0 -translate-x-full;
-    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.04), transparent);
-    animation: shimmer 1.5s infinite;
+  /* Soft Loading Pulse */
+  .pulse-soft {
+    @apply bg-gray-200 animate-pulse rounded-full;
   }
 
-  /* Custom Precision Scrollbar */
+  /* Custom Clean Scrollbar */
   .custom-scrollbar::-webkit-scrollbar {
     width: 6px;
   }
@@ -39,17 +36,11 @@
   }
 
   .custom-scrollbar::-webkit-scrollbar-thumb {
-    @apply bg-neutral-800 rounded-none;
+    @apply bg-gray-200 rounded-full;
   }
 
   .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-    @apply bg-neutral-700;
-  }
-}
-
-@keyframes shimmer {
-  100% {
-    transform: translateX(100%);
+    @apply bg-gray-300;
   }
 }
 
