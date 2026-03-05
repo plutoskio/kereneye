@@ -21,8 +21,8 @@ const ParticleNetwork = ({ count = 400 }) => {
             pos[i * 3 + 1] = radius * Math.sin(phi) * Math.sin(theta);
             pos[i * 3 + 2] = radius * Math.cos(phi);
 
-            // Subtle Altruist Gray / Blue blend
-            colorGen.setHSL(0.58 + Math.random() * 0.05, 0.4, 0.4 + Math.random() * 0.2);
+            // Darker, high-contrast Altruist Gray / Blue blend
+            colorGen.setHSL(0.58 + Math.random() * 0.05, 0.6, 0.3 + Math.random() * 0.2);
             cols[i * 3] = colorGen.r;
             cols[i * 3 + 1] = colorGen.g;
             cols[i * 3 + 2] = colorGen.b;
@@ -79,13 +79,13 @@ const ParticleNetwork = ({ count = 400 }) => {
                     <bufferAttribute attach="attributes-position" count={positions.length / 3} array={positions} itemSize={3} />
                     <bufferAttribute attach="attributes-color" count={colors.length / 3} array={colors} itemSize={3} />
                 </bufferGeometry>
-                <pointsMaterial size={0.06} vertexColors transparent opacity={0.6} sizeAttenuation={true} />
+                <pointsMaterial size={0.12} vertexColors transparent opacity={0.9} sizeAttenuation={true} />
             </points>
             <lineSegments ref={linesRef}>
                 <bufferGeometry>
                     <bufferAttribute attach="attributes-position" count={linePositions.length / 3} array={linePositions} itemSize={3} />
                 </bufferGeometry>
-                <lineBasicMaterial color="#E5E7EB" transparent opacity={0.15} />
+                <lineBasicMaterial color="#9CA3AF" transparent opacity={0.4} />
             </lineSegments>
         </>
     );
@@ -94,13 +94,13 @@ const ParticleNetwork = ({ count = 400 }) => {
 export default function Background3D() {
     return (
         <div className="absolute inset-0 z-0 pointer-events-none overflow-hidden bg-altruistGray-50">
-            <Canvas camera={{ position: [0, 0, 20], fov: 60 }} dpr={[1, 2]}>
+            <Canvas camera={{ position: [0, 0, 18], fov: 60 }} dpr={[1, 2]}>
                 <color attach="background" args={['#F9FAFB']} />
-                <ambientLight intensity={0.5} />
+                <ambientLight intensity={0.8} />
                 <ParticleNetwork count={500} />
             </Canvas>
-            {/* Soft vignette overlay */}
-            <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,transparent_0%,#F9FAFB_80%)] pointer-events-none" />
+            {/* Reduced vignette overlay so edges aren't overly faded */}
+            <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,transparent_0%,#F9FAFB_95%)] pointer-events-none" />
         </div>
     );
 }

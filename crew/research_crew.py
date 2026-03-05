@@ -68,15 +68,15 @@ def _create_agents() -> dict:
     sentiment_analyst = Agent(
         role="Market Sentiment Analyst",
         goal=(
-            "Assess the current market sentiment around the company by "
-            "analyzing recent news, analyst recommendations, and identifying "
-            "key catalysts or risks."
+            "Assess the prevailing market narrative, but more importantly, "
+            "synthesize the absolute strongest Bull Case and the most devastating "
+            "Bear Case currently debated by institutional investors."
         ),
         backstory=(
-            "You are a market intelligence analyst who monitors news flow and "
-            "analyst sentiment. You can quickly distinguish between noise and "
-            "signal, identify emerging themes, and assess how the market is "
-            "positioning around a stock."
+            "You are a contrarian market intelligence analyst. You ignore surface-level "
+            "noise and focus on the core existential debates surrounding a company. "
+            "You understand how shifting sentiment, regulatory fears, or technological "
+            "breakthroughs (like GenAI) can destroy or double a stock's value overnight."
         ),
         verbose=False,
         allow_delegation=False,
@@ -103,16 +103,15 @@ def _create_agents() -> dict:
     industry_analyst = Agent(
         role="Industry & Competitive Analyst",
         goal=(
-            "Analyze the company's competitive position within its industry, "
-            "identify its economic moat, assess industry dynamics, and provide "
-            "a SWOT analysis."
+            "Analyze the company's competitive moat and identify massive structural "
+            "shifts, technological disruptions (e.g., AI), or regulatory threats that "
+            "could render the company's business model obsolete."
         ),
         backstory=(
-            "You are a sector analyst with deep knowledge of industry dynamics "
-            "across all major sectors. You understand Porter's Five Forces, "
-            "competitive moats, industry life cycles, and macroeconomic "
-            "impacts. You can assess a company's strategic position with "
-            "limited data by leveraging your broad industry knowledge."
+            "You are a ruthless tech and sector analyst. You do not just look at "
+            "current market share; you look at what will destroy this company in 5 years. "
+            "If a software company is facing GenAI disruption (like Adobe vs Midjourney) "
+            "or an automaker is facing EV price wars, you surface it immediately. You pull no punches."
         ),
         verbose=False,
         allow_delegation=False,
@@ -225,16 +224,16 @@ RECENT NEWS:
 ANALYST RECOMMENDATIONS:
 {data.recommendations.to_string() if data.recommendations is not None and not data.recommendations.empty else 'Not available'}
 
-Provide a comprehensive sentiment analysis covering:
-1. News Flow: What is the primary narrative driving the stock in the news right now? (e.g., cost-cutting, AI growth, regulatory fears).
-2. Analyst Positioning: Summarize the distribution of Buy/Hold/Sell ratings. Are analysts overwhelmingly bullish, or is there skepticism?
-3. Catalysts: Identify 2 specific upside catalysts that could drive the stock higher in the next 6-12 months.
-4. Risks: Identify 2 specific downside risks.
+Provide a rigorous Bull/Bear analysis covering:
+1. The Core Narrative: What is the primary existential debate driving the stock right now?
+2. The Ultimate Bull Case: If everything goes right for this company over the next 3 years, why will the stock double?
+3. The Devastating Bear Case: What is the most likely reason this stock collapses? (Be highly specific, not general).
+4. Analyst Consensus Breakdown: Provide a quick summary of the Wall St ratings.
 
-Format your response as a concise sentiment analysis section.
+Format your response as a deep, opinionated sentiment analysis.
 """,
         agent=agents["sentiment"],
-        expected_output="Market sentiment summary with identified catalysts, risks, and news narratives.",
+        expected_output="An aggressive presentation of the ultimate Bull and Bear cases dominating market sentiment.",
     )
 
     technical_task = Task(
@@ -258,7 +257,7 @@ Write in plain language that fundamental investors can understand, avoiding over
 
     industry_task = Task(
         description=f"""
-Analyze the competitive position and industry dynamics for {data.name} ({data.ticker}).
+Analyze the existential competitive position and structural threats for {data.name} ({data.ticker}).
 
 COMPANY PROFILE:
 {format_company_profile(data)}
@@ -269,16 +268,16 @@ PEER COMPANIES:
 MACROECONOMIC CONTEXT:
 {format_macro(data)}
 
-Provide a comprehensive industry and competitive analysis covering:
-1. Economic Moat: Assess the company's competitive advantage. Does it have a wide, narrow, or no moat? (Consider brand, switching costs, network effects, cost advantages).
-2. Competitive Position: How does the company compare to the peers listed in terms of scale (Market Cap) and efficiency (Margins)?
-3. Macro Impact: How do the current macroeconomic conditions (like the current Fed Funds rate or GDP) impact this specific industry and company?
-4. Key Industry Trends: What structural tailwinds or headwinds is the sector facing?
+Provide a ruthless industry disruption analysis covering:
+1. The Economic Moat: Assess the current moat, but more importantly, determine if that moat is currently *expanding* or *decaying*.
+2. Structural Threats (Crucial): What is the biggest structural or technological threat to this business model? (e.g., Generative AI disruption, GLP-1 drugs for food companies, EV adoption for legacy auto). You must identify at least one major existential threat.
+3. Peer Warfare: How is the company positioned against the specific competitors listed? Who is hunting them?
+4. Macro Sensitivity: How sensitive are they to the current interest rate or geopolitical environment?
 
-Format your response as an industry analysis section for an equity research report.
+Format your response as a highly critical structural threat analysis.
 """,
         agent=agents["industry"],
-        expected_output="An industry deep dive evaluating the company's economic moat, competitive scale, and macro sensitivity.",
+        expected_output="A ruthless deep-dive evaluating structural, technological, and existential threats to the company's business model.",
     )
 
     # --- Report compilation ---
@@ -298,23 +297,19 @@ The report MUST follow this exact structure:
 Write a compelling 2-3 paragraph executive summary that synthesizes the most critical data points from the analysts.
 - Conclude with a clear **BUY / HOLD / SELL** recommendation with a confidence level (High/Medium/Low).
 
-## Company Overview
-Brief company description, sector, industry, and market cap.
+## The Bull & The Bear Case
+Be incredibly aggressive and specific here based on the sentiment analyst.
+- **The Bull Case:** [Detail the massive upside catalyst]
+- **The Bear Case:** [Detail the devastating downside scenario]
 
-## Financial Analysis
-[Integrate the financial analyst's findings. Use bullet points for strengths/risks.]
+## Structural & Technological Threats
+[Integrate the industry analyst's findings regarding AI disruption, moat decay, and existential, business-ending threats. Do NOT sugarcoat this section.]
 
-## Valuation Analysis  
-[Integrate the valuation specialist's findings regarding premiums/discounts.]
+## Financial & Valuation Analysis
+[Integrate the financial and valuation findings. Provide precise margin trends and peer premium/discount multiples.]
 
-## Technical Analysis
-[Integrate the technical analyst's findings.]
-
-## Market Sentiment & Catalysts
-[Integrate the sentiment analyst's findings regarding catalysts and risks.]
-
-## Industry & Competitive Position
-[Integrate the industry analyst's findings regarding the economic moat.]
+## Technical Outlook
+[Integrate the technical analyst's findings concisely.]
 
 ## Investment Thesis Summary
 Provide a final, definitive 3-bullet summary of why this stock is a Buy, Hold, or Sell. 
@@ -324,9 +319,10 @@ Provide a final, definitive 3-bullet summary of why this stock is a Buy, Hold, o
 *Date: {datetime.now().strftime('%Y-%m-%d')}*
 
 IMPORTANT: 
-- Be brutal as an editor. Remove any repetitive introductory phrases from the analysts (like "Based on the data provided...").
+- Be ruthless and highly opinionated. Institutional investors want to know what destroys the company.
+- You must explicitly address Generative AI or equivalent structural tech shifts if the company is in software/tech/services. 
 - Keep the formatting hyper-clean with Markdown headers and bullet points.
-- The tone must be authoritative and objective.
+- The tone must be authoritative, objective, and deep.
 """,
         agent=agents["report_writer"],
         expected_output="The final, polished equity research report.",
