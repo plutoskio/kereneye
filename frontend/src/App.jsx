@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import ReactMarkdown from 'react-markdown';
-import { Search, ShieldAlert, TrendingUp, TrendingDown, Newspaper, ArrowRight } from 'lucide-react';
+import { Search, ShieldAlert, TrendingUp, TrendingDown, Newspaper, ArrowRight, Database, DollarSign, Scale, Users, Activity, Target, FileText, CheckCircle2, Loader2 } from 'lucide-react';
 import Background3D from './Background3D';
 import './index.css';
 
@@ -13,8 +13,48 @@ function App() {
 
   const [companyData, setCompanyData] = useState(null);
   const [report, setReport] = useState(null);
+  const [reportStatus, setReportStatus] = useState('');
 
   const [marketData, setMarketData] = useState(null);
+
+  useEffect(() => {
+    let intervalId;
+    if (loadingReport && companyData?.ticker) {
+      const poll = async () => {
+        try {
+          const res = await fetch(`http://localhost:8000/api/research/status/${companyData.ticker}`);
+          if (res.ok) {
+            const data = await res.json();
+            setReportStatus(data.status);
+          }
+        } catch (err) {
+          console.error("Polling error", err);
+        }
+      };
+      poll();
+      intervalId = setInterval(poll, 1000);
+    } else if (!loadingReport) {
+      setReportStatus('');
+    }
+    return () => clearInterval(intervalId);
+  }, [loadingReport, companyData]);
+
+  const REPORT_STEPS = [
+    { id: "Collecting Data", label: "Data Collection", icon: Database },
+    { id: "Analyzing Financials & Margins", label: "Financial Analysis", icon: DollarSign },
+    { id: "Running Valuation Models", label: "Valuation Modeling", icon: Scale },
+    { id: "Assessing Market Sentiment", label: "Market Sentiment", icon: Users },
+    { id: "Evaluating Technical Action", label: "Technical Analysis", icon: Activity },
+    { id: "Scanning for Industry Threats", label: "Industry Threats", icon: Target },
+    { id: "Drafting Executive Report", label: "Report Generation", icon: FileText },
+  ];
+
+  const getCurrentStepIndex = () => {
+    if (!reportStatus) return 0;
+    if (reportStatus === "Complete" || reportStatus === "Finalizing") return REPORT_STEPS.length;
+    const idx = REPORT_STEPS.findIndex(s => s.id === reportStatus);
+    return idx !== -1 ? idx : 0;
+  };
 
   useEffect(() => {
     const fetchMarketOverview = async () => {
@@ -288,7 +328,7 @@ function App() {
                   {loadingReport && (
                     <span className="text-altruistBlue text-[12px] font-medium flex items-center gap-2">
                       <div className="w-2 h-2 bg-altruistBlue animate-pulse rounded-full" />
-                      Generating Analysis...
+                      {reportStatus || 'Initializing...'}
                     </span>
                   )}
                 </div>
@@ -303,20 +343,70 @@ function App() {
                       <ReactMarkdown>{report}</ReactMarkdown>
                     </div>
                   ) : loadingReport || loadingInitial ? (
-                    <div className="w-full space-y-8">
-                      <div className="skeleton h-8 w-3/4 rounded-sm" />
-                      <div className="space-y-3">
-                        <div className="skeleton h-4 w-full rounded-sm" />
-                        <div className="skeleton h-4 w-full rounded-sm" />
-                        <div className="skeleton h-4 w-5/6 rounded-sm" />
+                    loadingInitial ? (
+                      <div className="w-full space-y-8">
+                        <div className="skeleton h-8 w-3/4 rounded-sm" />
+                        <div className="space-y-3">
+                          <div className="skeleton h-4 w-full rounded-sm" />
+                          <div className="skeleton h-4 w-full rounded-sm" />
+                          <div className="skeleton h-4 w-5/6 rounded-sm" />
+                        </div>
+                        <div className="skeleton h-6 w-1/2 rounded-sm mt-10" />
+                        <div className="space-y-3">
+                          <div className="skeleton h-4 w-full rounded-sm" />
+                          <div className="skeleton h-4 w-11/12 rounded-sm" />
+                          <div className="skeleton h-4 w-full rounded-sm" />
+                        </div>
                       </div>
-                      <div className="skeleton h-6 w-1/2 rounded-sm mt-10" />
-                      <div className="space-y-3">
-                        <div className="skeleton h-4 w-full rounded-sm" />
-                        <div className="skeleton h-4 w-11/12 rounded-sm" />
-                        <div className="skeleton h-4 w-full rounded-sm" />
+                    ) : (
+                      <div className="flex flex-col h-full items-center justify-center py-8 animate-fade-in-up">
+                        <div className="w-full max-w-md">
+                          <h4 className="text-[16px] font-bold text-altruistDark mb-10 text-center flex items-center justify-center gap-3">
+                            <div className="w-4 h-4 rounded-full border-2 border-altruistBlue border-t-transparent animate-spin"></div>
+                            Synthesizing Advisory Intelligence
+                          </h4>
+
+                          <div className="space-y-6 relative ml-4">
+                            {/* Vertical connecting line */}
+                            <div className="absolute left-[19px] top-6 bottom-6 w-[2px] bg-altruistGray-100 z-0"></div>
+
+                            {REPORT_STEPS.map((step, index) => {
+                              const currentIndex = getCurrentStepIndex();
+                              const isCompleted = index < currentIndex;
+                              const isActive = index === currentIndex;
+                              const isPending = index > currentIndex;
+
+                              const Icon = step.icon;
+
+                              return (
+                                <div key={step.id} className={`flex items-start gap-5 relative z-10 transition-all duration-500 ${isPending ? 'opacity-40' : 'opacity-100'}`}>
+                                  {/* Icon container */}
+                                  <div className={`w-10 h-10 rounded-full flex items-center justify-center shadow-sm border-2 transition-colors duration-300 bg-altruistWhite
+                                    ${isCompleted ? 'bg-altruistBlue border-altruistBlue text-white' :
+                                      isActive ? 'border-altruistBlue text-altruistBlue shadow-[0_0_15px_rgba(21,101,192,0.3)]' :
+                                        'border-altruistGray-200 text-altruistGray-400'}
+                                  `}>
+                                    {isCompleted ? <CheckCircle2 className="w-5 h-5" /> : isActive ? <Loader2 className="w-5 h-5 animate-spin" /> : <Icon className="w-5 h-5" />}
+                                  </div>
+
+                                  {/* Text */}
+                                  <div className={`flex-1 pt-2 transition-all duration-300 ${isActive ? 'scale-105 origin-left' : ''}`}>
+                                    <h5 className={`text-[14px] font-bold tracking-wide uppercase ${isActive ? 'text-altruistBlue' : isCompleted ? 'text-altruistDark' : 'text-altruistGray-400'}`}>
+                                      {step.label}
+                                    </h5>
+                                    {isActive && (
+                                      <p className="text-[12px] text-altruistGray-500 font-medium mt-1 animate-pulse">
+                                        Agents are actively processing...
+                                      </p>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
                       </div>
-                    </div>
+                    )
                   ) : (
                     <div className="h-full flex flex-col items-center justify-center text-altruistGray-400">
                       <p className="text-[13px] font-medium uppercase tracking-widest text-center">Analysis pending<br />Search a ticker to synthesize report</p>

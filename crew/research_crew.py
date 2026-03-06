@@ -350,7 +350,7 @@ IMPORTANT:
 # Crew Runner
 # ---------------------------------------------------------------------------
 
-def run_research_crew(data: CompanyData) -> str:
+def run_research_crew(data: CompanyData, progress_callback=None) -> str:
     """
     Run the full equity research crew on the collected data.
 
@@ -361,11 +361,32 @@ def run_research_crew(data: CompanyData) -> str:
     agents = _create_agents()
     tasks = _create_tasks(agents, data)
 
+    stage_names = [
+        "Analyzing Financials & Margins",
+        "Running Valuation Models",
+        "Assessing Market Sentiment",
+        "Evaluating Technical Action",
+        "Scanning for Industry Threats",
+        "Drafting Executive Report",
+        "Finalizing"
+    ]
+    current_stage_idx = 0
+
+    if progress_callback:
+        progress_callback(stage_names[0])
+
+    def task_completed_cb(output):
+        nonlocal current_stage_idx
+        current_stage_idx += 1
+        if current_stage_idx < len(stage_names) and progress_callback:
+            progress_callback(stage_names[current_stage_idx])
+
     crew = Crew(
         agents=list(agents.values()),
         tasks=tasks,
         process=Process.sequential,  # Tasks run in order; report_writer goes last
         verbose=True,
+        task_callback=task_completed_cb,
     )
 
     print("🚀 Running analysis agents...\n")

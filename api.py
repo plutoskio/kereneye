@@ -40,6 +40,9 @@ class CompanyResponse(BaseModel):
 # in the time between the frontend hitting /company and then /research
 _cache = {}
 
+# Global dictionary to store the current generation status for a given ticker
+_task_status = {}
+
 @app.get("/api/company/{ticker}", response_model=CompanyResponse)
 async def get_company_data(ticker: str):
     """
@@ -89,6 +92,9 @@ async def get_research_report(ticker: str):
     """
     ticker = ticker.upper()
     
+    # Initialize status
+    _task_status[ticker] = "Collecting Data"
+    
     # Check if we already have the raw data cached from the /company endpoint
     # to save time calling YFinance again.
     if ticker in _cache:
@@ -98,13 +104,27 @@ async def get_research_report(ticker: str):
         data = await asyncer.asyncify(collector.collect)(ticker)
         
         if not data.name or data.name == ticker:
+            _task_status[ticker] = "Error: Company not found"
             raise HTTPException(status_code=404, detail="Company data not found")
+
+    def progress_callback(status: str):
+        _task_status[ticker] = status
 
     # Run the heavy CrewAI logic in a background async worker
     # We never cache the final report string, so querying twice gives a fresh generation.
-    report_markdown = await asyncer.asyncify(run_research_crew)(data)
+    report_markdown = await asyncer.asyncify(run_research_crew)(data, progress_callback)
     
+    _task_status[ticker] = "Complete"
     return {"report": report_markdown}
+
+@app.get("/api/research/status/{ticker}")
+async def get_research_status(ticker: str):
+    """
+    Returns the current status of the report generation for the given ticker.
+    """
+    ticker = ticker.upper()
+    return {"status": _task_status.get(ticker, "Not Started")}
+
 
 @app.get("/api/market/overview")
 async def get_market_overview():
