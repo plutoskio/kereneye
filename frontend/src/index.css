@@ -29,21 +29,14 @@
     animation: shimmer 1.5s infinite;
   }
 
-  /* Custom Precision Scrollbar */
-  .custom-scrollbar::-webkit-scrollbar {
-    width: 6px;
+  /* Hide scrollbar for a clean ribbon look */
+  .hide-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
   }
 
-  .custom-scrollbar::-webkit-scrollbar-track {
-    background: transparent;
-  }
-
-  .custom-scrollbar::-webkit-scrollbar-thumb {
-    @apply bg-altruistGray-300 rounded-sm;
-  }
-
-  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-    @apply bg-altruistGray-400;
+  .hide-scrollbar::-webkit-scrollbar {
+    display: none;
   }
 }
 

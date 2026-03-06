@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import uvicorn
 import asyncer
+import yfinance as yf
 
 from data.collector import DataCollector
 from crew.research_crew import run_research_crew
@@ -102,6 +103,71 @@ async def get_research_report(ticker: str):
     report_markdown = await asyncer.asyncify(run_research_crew)(data)
     
     return {"report": report_markdown}
+
+@app.get("/api/market/overview")
+async def get_market_overview():
+    """
+    Fetches real-time market data for the landing page dashboard.
+    Includes major international indices and top breaking market headlines.
+    """
+    indices = {
+        "S&P 500": "^GSPC",
+        "Nasdaq": "^IXIC",
+        "FTSE 100": "^FTSE",
+        "CAC 40": "^FCHI",
+        "DAX": "^GDAXI",
+        "Nikkei 225": "^N225"
+    }
+    
+    # Run the blocking yfinance calls in an async thread
+    def fetch_market_data():
+        result = {"indices": [], "news": []}
+        
+        # 1. Fetch Indices
+        tickers = yf.Tickers(" ".join(indices.values()))
+        for name, symbol in indices.items():
+            try:
+                info = tickers.tickers[symbol].info
+                if info:
+                    current = info.get("regularMarketPrice", info.get("previousClose", 0))
+                    prev = info.get("regularMarketPreviousClose", info.get("previousClose", 1))
+                    
+                    if current and prev:
+                        pct_change = ((current - prev) / prev) * 100
+                        result["indices"].append({
+                            "name": name,
+                            "price": round(current, 2),
+                            "change_pct": round(pct_change, 2)
+                        })
+            except Exception as e:
+                print(f"Failed to fetch index {symbol}: {e}")
+                
+        # 2. Fetch Broad Market News (Proxy via SPY)
+        try:
+            spy = yf.Ticker("SPY")
+            news = spy.news
+            for item in news[:5]: # Top 5 headlines
+                content = item.get("content", {})
+                provider = content.get("provider", {})
+                click_url = content.get("clickThroughUrl", {})
+                
+                title = content.get("title", "")
+                
+                # Only append if we actually got a title
+                if title:
+                    result["news"].append({
+                        "title": title,
+                        "publisher": provider.get("displayName", "Market News"),
+                        "link": click_url.get("url", "#"),
+                        "timestamp": content.get("pubDate", 0)
+                    })
+        except Exception as e:
+            print(f"Failed to fetch market news: {e}")
+            
+        return result
+
+    data = await asyncer.asyncify(fetch_market_data)()
+    return data
 
 if __name__ == "__main__":
     uvicorn.run("api:app", host="0.0.0.0", port=8000, reload=True)

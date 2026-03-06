@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import ReactMarkdown from 'react-markdown';
-import { Search, ShieldAlert } from 'lucide-react';
+import { Search, ShieldAlert, TrendingUp, TrendingDown, Newspaper, ArrowRight } from 'lucide-react';
 import Background3D from './Background3D';
 import './index.css';
 
@@ -13,6 +13,23 @@ function App() {
 
   const [companyData, setCompanyData] = useState(null);
   const [report, setReport] = useState(null);
+
+  const [marketData, setMarketData] = useState(null);
+
+  useEffect(() => {
+    const fetchMarketOverview = async () => {
+      try {
+        const res = await fetch('http://localhost:8000/api/market/overview');
+        if (res.ok) {
+          const data = await res.json();
+          setMarketData(data);
+        }
+      } catch (err) {
+        console.error("Failed to fetch market overview:", err);
+      }
+    };
+    fetchMarketOverview();
+  }, []);
 
   const fetchCompanyData = async (symbol) => {
     try {
@@ -107,13 +124,60 @@ function App() {
       <main className="flex-1 w-full max-w-[1600px] mx-auto p-8">
         {!companyData && !loadingInitial ? (
           // LANDING STATE
-          <div className="relative h-[80vh] flex flex-col items-center justify-center animate-fade-in-up text-center w-full rounded-sm overflow-hidden">
+          <div className="relative h-[80vh] flex flex-col animate-fade-in-up w-full rounded-sm overflow-hidden bg-altruistWhite border border-altruistGray-200 shadow-sm">
             <Background3D />
-            <div className="relative z-10 flex flex-col items-center justify-center pointer-events-none p-12 bg-altruistWhite/80 backdrop-blur-md rounded-lg shadow-sm border border-altruistGray-200">
-              <h2 className="text-[44px] font-semibold tracking-tight text-altruistDark mb-4">Advisory Intelligence.</h2>
-              <p className="text-altruistGray-600 text-[17px] leading-relaxed max-w-lg font-medium">
-                Enter a ticker symbol to access high-fidelity institutional data and AI-generated equity research reports.
-              </p>
+
+            {/* GLOBAL INDICES RIBBON */}
+            <div className="relative z-10 w-full bg-altruistWhite/90 backdrop-blur-md border-b border-altruistGray-200 px-6 py-3 flex items-center justify-between overflow-x-auto hide-scrollbar">
+              {marketData ? (
+                <div className="flex items-center gap-8 min-w-max">
+                  {marketData.indices.map((idx, i) => (
+                    <div key={i} className="flex items-center gap-2">
+                      <span className="text-[12px] font-bold text-altruistGray-800 uppercase tracking-wide">{idx.name}</span>
+                      <span className="font-mono text-[13px] font-medium text-altruistDark">{idx.price.toFixed(2)}</span>
+                      <span className={`flex items-center text-[12px] font-bold ${idx.change_pct >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                        {idx.change_pct >= 0 ? <TrendingUp className="w-3 h-3 mr-1" /> : <TrendingDown className="w-3 h-3 mr-1" />}
+                        {Math.abs(idx.change_pct).toFixed(2)}%
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="flex items-center gap-8 animate-pulse text-altruistGray-400 text-[12px] font-medium uppercase tracking-widest">
+                  Loading market indices...
+                </div>
+              )}
+            </div>
+
+            {/* CENTER BRANDING & SEARCH PROMPT */}
+            <div className="relative z-10 flex-1 flex flex-col items-center justify-center pointer-events-none p-12">
+              <div className="bg-altruistWhite/80 backdrop-blur-md rounded-lg shadow-sm border border-altruistGray-200 p-10 text-center">
+                <h2 className="text-[44px] font-semibold tracking-tight text-altruistDark mb-4">Advisory Intelligence.</h2>
+                <p className="text-altruistGray-600 text-[17px] leading-relaxed max-w-lg font-medium mx-auto">
+                  Enter a ticker symbol to access high-fidelity institutional data and AI-generated equity research reports.
+                </p>
+              </div>
+
+              {/* MARKET HEADLINES LIST */}
+              {marketData && marketData.news && marketData.news.length > 0 && (
+                <div className="mt-12 w-full max-w-3xl pointer-events-auto bg-altruistWhite/90 backdrop-blur-md border border-altruistGray-200 shadow-sm rounded-sm overflow-hidden text-left">
+                  <div className="border-b border-altruistGray-200 px-6 py-3 bg-altruistGray-50/50 flex items-center gap-2">
+                    <Newspaper className="w-4 h-4 text-altruistGray-500" />
+                    <h3 className="text-[12px] font-bold text-altruistGray-800 uppercase tracking-wide">Intraday Market Brief</h3>
+                  </div>
+                  <div className="divide-y divide-altruistGray-200">
+                    {marketData.news.slice(0, 4).map((news, i) => (
+                      <a key={i} href={news.link} target="_blank" rel="noopener noreferrer" className="block px-6 py-4 hover:bg-altruistGray-50 transition-colors group">
+                        <p className="text-[14px] font-medium text-altruistDark group-hover:text-altruistBlue mb-1 leading-snug">{news.title}</p>
+                        <div className="flex items-center justify-between">
+                          <span className="text-[11px] font-bold text-altruistGray-500 uppercase tracking-wider">{news.publisher}</span>
+                          <ArrowRight className="w-3 h-3 text-altruistGray-400 group-hover:text-altruistBlue transition-colors" />
+                        </div>
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         ) : (
