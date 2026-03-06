@@ -184,6 +184,7 @@ Format your response as a rigorous, data-driven analysis section. Use specific n
 """,
         agent=agents["financial"],
         expected_output="A quantitative financial analysis with YoY comparisons and margin trend analysis.",
+        async_execution=True,
     )
 
     valuation_task = Task(
@@ -212,6 +213,7 @@ Format your response as a professional valuation section for an institutional re
 """,
         agent=agents["valuation"],
         expected_output="A comprehensive valuation assessment with explicit premium/discount calculations against peers.",
+        async_execution=True,
     )
 
     sentiment_task = Task(
@@ -234,6 +236,7 @@ Format your response as a deep, opinionated sentiment analysis.
 """,
         agent=agents["sentiment"],
         expected_output="An aggressive presentation of the ultimate Bull and Bear cases dominating market sentiment.",
+        async_execution=True,
     )
 
     technical_task = Task(
@@ -253,6 +256,7 @@ Write in plain language that fundamental investors can understand, avoiding over
 """,
         agent=agents["technical"],
         expected_output="A clean technical analysis defining the trend, momentum, and key price levels.",
+        async_execution=True,
     )
 
     industry_task = Task(
@@ -278,6 +282,7 @@ Format your response as a highly critical structural threat analysis.
 """,
         agent=agents["industry"],
         expected_output="A ruthless deep-dive evaluating structural, technological, and existential threats to the company's business model.",
+        async_execution=True,
     )
 
     # --- Report compilation ---
@@ -370,21 +375,25 @@ def run_research_crew(data: CompanyData, progress_callback=None) -> str:
         "Drafting Executive Report",
         "Finalizing"
     ]
-    current_stage_idx = 0
+    completed_analyses = 0
 
     if progress_callback:
-        progress_callback(stage_names[0])
+        progress_callback("Concurrent Analysis (0/5 completed)")
 
     def task_completed_cb(output):
-        nonlocal current_stage_idx
-        current_stage_idx += 1
-        if current_stage_idx < len(stage_names) and progress_callback:
-            progress_callback(stage_names[current_stage_idx])
+        nonlocal completed_analyses
+        completed_analyses += 1
+        
+        # Tasks 1-5 run in parallel. Task 6 is the report writer.
+        if completed_analyses < 5 and progress_callback:
+            progress_callback(f"Concurrent Analysis ({completed_analyses}/5 completed)")
+        elif completed_analyses == 5 and progress_callback:
+            progress_callback("Drafting Executive Report")
 
     crew = Crew(
         agents=list(agents.values()),
         tasks=tasks,
-        process=Process.sequential,  # Tasks run in order; report_writer goes last
+        process=Process.sequential,  # Tasks 1-5 will still run in parallel due to async_execution=True
         verbose=True,
         task_callback=task_completed_cb,
     )

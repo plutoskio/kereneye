@@ -49,11 +49,26 @@ function App() {
     { id: "Drafting Executive Report", label: "Report Generation", icon: FileText },
   ];
 
-  const getCurrentStepIndex = () => {
-    if (!reportStatus) return 0;
-    if (reportStatus === "Complete" || reportStatus === "Finalizing") return REPORT_STEPS.length;
-    const idx = REPORT_STEPS.findIndex(s => s.id === reportStatus);
-    return idx !== -1 ? idx : 0;
+  const getStepState = (index, status) => {
+    if (!status) return { isCompleted: false, isActive: index === 0, isPending: index > 0 };
+    if (status === "Complete" || status === "Finalizing") return { isCompleted: true, isActive: false, isPending: false };
+    
+    if (status === "Collecting Data") {
+      return { isCompleted: false, isActive: index === 0, isPending: index > 0 };
+    }
+    
+    if (status.startsWith("Concurrent Analysis")) {
+      if (index === 0) return { isCompleted: true, isActive: false, isPending: false };
+      if (index >= 1 && index <= 5) return { isCompleted: false, isActive: true, isPending: false };
+      return { isCompleted: false, isActive: false, isPending: true };
+    }
+    
+    if (status === "Drafting Executive Report") {
+      if (index <= 5) return { isCompleted: true, isActive: false, isPending: false };
+      if (index === 6) return { isCompleted: false, isActive: true, isPending: false };
+    }
+
+    return { isCompleted: false, isActive: false, isPending: true };
   };
 
   useEffect(() => {
@@ -371,24 +386,21 @@ function App() {
                             <div className="absolute left-[19px] top-6 bottom-6 w-[2px] bg-altruistGray-100 z-0"></div>
 
                             {REPORT_STEPS.map((step, index) => {
-                              const currentIndex = getCurrentStepIndex();
-                              const isCompleted = index < currentIndex;
-                              const isActive = index === currentIndex;
-                              const isPending = index > currentIndex;
-
+                              const { isCompleted, isActive, isPending } = getStepState(index, reportStatus);
+                              
                               const Icon = step.icon;
-
+                              
                               return (
                                 <div key={step.id} className={`flex items-start gap-5 relative z-10 transition-all duration-500 ${isPending ? 'opacity-40' : 'opacity-100'}`}>
                                   {/* Icon container */}
                                   <div className={`w-10 h-10 rounded-full flex items-center justify-center shadow-sm border-2 transition-colors duration-300 bg-altruistWhite
-                                    ${isCompleted ? 'bg-altruistBlue border-altruistBlue text-white' :
-                                      isActive ? 'border-altruistBlue text-altruistBlue shadow-[0_0_15px_rgba(21,101,192,0.3)]' :
-                                        'border-altruistGray-200 text-altruistGray-400'}
+                                    ${isCompleted ? 'bg-altruistBlue border-altruistBlue text-white' : 
+                                      isActive ? 'border-altruistBlue text-altruistBlue shadow-[0_0_15px_rgba(21,101,192,0.3)]' : 
+                                      'border-altruistGray-200 text-altruistGray-400'}
                                   `}>
                                     {isCompleted ? <CheckCircle2 className="w-5 h-5" /> : isActive ? <Loader2 className="w-5 h-5 animate-spin" /> : <Icon className="w-5 h-5" />}
                                   </div>
-
+                                  
                                   {/* Text */}
                                   <div className={`flex-1 pt-2 transition-all duration-300 ${isActive ? 'scale-105 origin-left' : ''}`}>
                                     <h5 className={`text-[14px] font-bold tracking-wide uppercase ${isActive ? 'text-altruistBlue' : isCompleted ? 'text-altruistDark' : 'text-altruistGray-400'}`}>
@@ -396,7 +408,7 @@ function App() {
                                     </h5>
                                     {isActive && (
                                       <p className="text-[12px] text-altruistGray-500 font-medium mt-1 animate-pulse">
-                                        Agents are actively processing...
+                                        {index >= 1 && index <= 5 ? "Analyzing concurrently..." : "Agents are actively processing..."}
                                       </p>
                                     )}
                                   </div>

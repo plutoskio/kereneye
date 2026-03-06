@@ -125,11 +125,42 @@ kereneye/
     └── reports/               # Generated reports
 ```
 
-## Tech Stack
+## Tech Stack & Tooling Rationale
 
-- **[CrewAI](https://crewai.com)** — Multi-agent orchestration framework
-- **[yfinance](https://github.com/ranaroussi/yfinance)** — Financial data from Yahoo Finance
-- **[Finnhub](https://finnhub.io)** — Peer company discovery
-- **[FRED API](https://fred.stlouisfed.org)** — Macroeconomic data
-- **[matplotlib](https://matplotlib.org)** — Technical chart generation
-- **[OpenAI GPT](https://openai.com)** — LLM backbone for analysis agents
+The KerenEye system is separated into a Python backend (for heavy AI processing) and a modern React frontend (for presentation).
+
+### Backend (Python & AI)
+
+- **[CrewAI](https://crewai.com)**: Used as the core Multi-Agent orchestration framework. 
+  - *Why CrewAI?* Instead of relying on a single massive LLM prompt (which often hallucinates or loses detail), CrewAI allows us to break down complex financial analysis into distinct personas (e.g., Financial Analyst, Technical Analyst). By running these specialized agents in parallel with specific tools and focused goals, we get a much deeper, more accurate, and nuanced final report.
+- **[FastAPI](https://fastapi.tiangolo.com/)**: Serves as the Python backend framework connecting the CLI core to the web app.
+  - *Why FastAPI?* It is lightweight, incredibly fast, and natively supports asynchronous execution (`async`/`await`), which is crucial for running background CrewAI tasks and streaming status updates to the frontend without blocking the main server.
+- **[yfinance](https://github.com/ranaroussi/yfinance)**: Financial data from Yahoo Finance.
+  - *Why yfinance?* It is free, requires no API key, and provides reliable, comprehensive historical price data, financial statements, and basic corporate metadata.
+- **[Finnhub](https://finnhub.io)**: Peer discovery and professional market news.
+- **[FRED API](https://fred.stlouisfed.org)**: Macroeconomic data (interest rates, GDP).
+- **[OpenAI GPT](https://openai.com)**: The underlying LLM backbone powering the CrewAI agents.
+
+### Frontend (React & Vite)
+
+- **[React](https://react.dev/) + [Vite](https://vitejs.dev/)**: The core UI framework.
+  - *Why React/Vite?* React handles the complex state management required for building interactive dashboards (like syncing the 3D background with the loading status). Vite provides near-instant Hot Module Replacement (HMR) for incredibly fast development.
+- **[Tailwind CSS](https://tailwindcss.com/)**: For styling.
+  - *Why Tailwind?* It allows for rapid, utility-first styling to create the premium, glassmorphic "Advisory Intelligence" aesthetic strictly through standardized classes, avoiding messy external CSS files.
+- **[Recharts](https://recharts.org/)**: For charting equity performance.
+  - *Why Recharts?* It renders beautiful, responsive SVG charts that integrate cleanly with React state and can easily inherit Tailwind theme colors.
+- **[@react-three/fiber](https://docs.pmnd.rs/react-three-fiber)**: For the 3D particle network background.
+  - *Why Three.js?* It provides the premium, dynamic, and interactive "data network" visual that signals high-end institutional software.
+
+## Operational Process: How the App Works
+
+The operational flow of the KerenEye application is strictly built to ensure accuracy, speed, and real-time user feedback.
+
+1. **User Request**: The user enters a stock ticker (e.g., "AAPL") into the React frontend search bar and hits enter.
+2. **Instant Pre-fetch (Synchronous)**: The frontend immediately hits the backend `GET /api/company/{ticker}` endpoint. The backend synchronously uses `yfinance` to grab the company's current price, market cap, basic ratios, and historical price data. This data is returned instantly to paint the primary React dashboard and the Recharts historical chart so the user isn't left staring at a blank screen.
+3. **Agent Orchestration (Asynchronous)**: Simultaneously, the frontend hits `GET /api/research/{ticker}`. This triggers the heavy lifting. The backend initializes a `Crew` of 6 distinct AI personas (Agents).
+4. **Data Injection**: The raw data collected earlier is cleanly formatted into string contexts and injected into the specific Tasks assigned to each Agent. *Crucially, we do not let the LLM browse the live internet for data, preventing hallucination. We feed it strictly defined, factual data gathered by Python.*
+5. **Concurrent Execution**: The first 5 agents (Financial Analyst, Valuation Specialist, Sentiment Analyst, Technical Analyst, Industry Analyst) execute their assigned tasks **simultaneously in parallel**. This vastly speeds up report generation time.
+6. **Real-Time Progress Tracking (Polling)**: While the agents run, the React frontend polls `GET /api/research/status/{ticker}` every second. As tasks finish on the backend, a global status dictionary is updated, which the frontend reads to animate the beautiful, step-by-step loading stepper dynamically.
+7. **Synthesis & Finalization**: Once the 5 parallel analysts finish, the 6th agent (the Report Writer) activates. It ingests all 5 outputs and synthesizes them into a cohesive, properly formatted Markdown equity research report.
+8. **Rendering**: The backend returns the final Markdown string to the frontend, which is rendered using `react-markdown` in the Executive Dossier panel.
