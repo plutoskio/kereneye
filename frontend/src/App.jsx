@@ -94,7 +94,11 @@ function App() {
       {/* GLOBAL HEADER */}
       <header className="border-b border-altruistGray-200 bg-altruistWhite px-8 h-16 sticky top-0 z-50 flex items-center justify-between shadow-sm">
         <div className="flex items-center gap-6">
-          <h1 className="text-xl font-bold tracking-tight text-altruistDark">KerenEye</h1>
+          <h1 className="text-xl font-bold tracking-tight text-altruistDark flex items-center gap-3">
+            KerenEye
+            <span className="text-altruistGray-300 font-normal">|</span>
+            <span className="text-altruistGray-500 font-medium">Advisory Intelligence</span>
+          </h1>
         </div>
 
         <form onSubmit={handleSearch} className="flex items-center">
@@ -149,14 +153,8 @@ function App() {
               )}
             </div>
 
-            {/* CENTER BRANDING & SEARCH PROMPT */}
+            {/* CENTER BRANDING & SEARCH PROMPT REMOVED TO SHOWCASE FULL 3D BG */}
             <div className="relative z-10 flex-1 flex flex-col items-center justify-center pointer-events-none p-12">
-              <div className="bg-altruistWhite/80 backdrop-blur-md rounded-lg shadow-sm border border-altruistGray-200 p-10 text-center">
-                <h2 className="text-[44px] font-semibold tracking-tight text-altruistDark mb-4">Advisory Intelligence.</h2>
-                <p className="text-altruistGray-600 text-[17px] leading-relaxed max-w-lg font-medium mx-auto">
-                  Enter a ticker symbol to access high-fidelity institutional data and AI-generated equity research reports.
-                </p>
-              </div>
 
               {/* MARKET HEADLINES LIST */}
               {marketData && marketData.news && marketData.news.length > 0 && (

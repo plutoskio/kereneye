@@ -21,8 +21,8 @@ const ParticleNetwork = ({ count = 400 }) => {
             pos[i * 3 + 1] = radius * Math.sin(phi) * Math.sin(theta);
             pos[i * 3 + 2] = radius * Math.cos(phi);
 
-            // Darker, high-contrast Altruist Gray / Blue blend
-            colorGen.setHSL(0.58 + Math.random() * 0.05, 0.6, 0.3 + Math.random() * 0.2);
+            // Wise Blue palette
+            colorGen.setHSL(0.60 + Math.random() * 0.05, 0.85, 0.4 + Math.random() * 0.2);
             cols[i * 3] = colorGen.r;
             cols[i * 3 + 1] = colorGen.g;
             cols[i * 3 + 2] = colorGen.b;
