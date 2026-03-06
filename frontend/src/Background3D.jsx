@@ -13,7 +13,7 @@ const ParticleNetwork = ({ count = 400 }) => {
         const colorGen = new THREE.Color();
 
         for (let i = 0; i < count; i++) {
-            const radius = 25 * Math.random();
+            const radius = 120 * Math.random();
             const theta = Math.random() * 2 * Math.PI;
             const phi = Math.acos((Math.random() * 2) - 1);
 
@@ -33,7 +33,7 @@ const ParticleNetwork = ({ count = 400 }) => {
     // Create connecting lines based on distance
     const linePositions = useMemo(() => {
         const lines = [];
-        const maxDist = 4.5;
+        const maxDist = 12.0;
         for (let i = 0; i < count; i++) {
             for (let j = i + 1; j < count; j++) {
                 const dx = positions[i * 3] - positions[j * 3];
@@ -94,10 +94,10 @@ const ParticleNetwork = ({ count = 400 }) => {
 export default function Background3D() {
     return (
         <div className="absolute inset-0 z-0 pointer-events-none overflow-hidden bg-altruistGray-50">
-            <Canvas camera={{ position: [0, 0, 18], fov: 60 }} dpr={[1, 2]}>
+            <Canvas camera={{ position: [0, 0, 12], fov: 60 }} dpr={[1, 2]}>
                 <color attach="background" args={['#F9FAFB']} />
                 <ambientLight intensity={0.8} />
-                <ParticleNetwork count={500} />
+                <ParticleNetwork count={1500} />
             </Canvas>
             {/* Reduced vignette overlay so edges aren't overly faded */}
             <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,transparent_0%,#F9FAFB_95%)] pointer-events-none" />
