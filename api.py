@@ -9,6 +9,8 @@ from pydantic import BaseModel
 import uvicorn
 import asyncer
 import yfinance as yf
+import requests
+import config
 
 from data.collector import DataCollector
 from crew.research_crew import run_research_crew
@@ -142,27 +144,25 @@ async def get_market_overview():
             except Exception as e:
                 print(f"Failed to fetch index {symbol}: {e}")
                 
-        # 2. Fetch Broad Market News (Proxy via SPY)
+        # 2. Fetch Professional Market News via Finnhub
         try:
-            spy = yf.Ticker("SPY")
-            news = spy.news
-            for item in news[:5]: # Top 5 headlines
-                content = item.get("content", {})
-                provider = content.get("provider", {})
-                click_url = content.get("clickThroughUrl", {})
-                
-                title = content.get("title", "")
-                
-                # Only append if we actually got a title
-                if title:
-                    result["news"].append({
-                        "title": title,
-                        "publisher": provider.get("displayName", "Market News"),
-                        "link": click_url.get("url", "#"),
-                        "timestamp": content.get("pubDate", 0)
-                    })
+            api_key = config.FINNHUB_API_KEY
+            if api_key:
+                url = f"https://finnhub.io/api/v1/news?category=general&token={api_key}"
+                response = requests.get(url, timeout=5)
+                if response.status_code == 200:
+                    news = response.json()
+                    # Finnhub returns a list of dictionaries with 'headline', 'source', 'url', 'datetime'
+                    for item in news[:5]:
+                        if item.get("headline"):
+                            result["news"].append({
+                                "title": item.get("headline", ""),
+                                "publisher": item.get("source", "Market News"),
+                                "link": item.get("url", "#"),
+                                "timestamp": item.get("datetime", 0)
+                            })
         except Exception as e:
-            print(f"Failed to fetch market news: {e}")
+            print(f"Failed to fetch market news from Finnhub: {e}")
             
         return result
 

@@ -156,24 +156,31 @@ function App() {
             {/* CENTER BRANDING & SEARCH PROMPT REMOVED TO SHOWCASE FULL 3D BG */}
             <div className="relative z-10 flex-1 flex flex-col items-center justify-center pointer-events-none p-12">
 
-              {/* MARKET HEADLINES LIST */}
+              {/* SCATTERED MARKET HEADLINES LIST */}
               {marketData && marketData.news && marketData.news.length > 0 && (
-                <div className="mt-12 w-full max-w-3xl pointer-events-auto bg-altruistWhite/90 backdrop-blur-md border border-altruistGray-200 shadow-sm rounded-sm overflow-hidden text-left">
-                  <div className="border-b border-altruistGray-200 px-6 py-3 bg-altruistGray-50/50 flex items-center gap-2">
-                    <Newspaper className="w-4 h-4 text-altruistGray-500" />
-                    <h3 className="text-[12px] font-bold text-altruistGray-800 uppercase tracking-wide">Intraday Market Brief</h3>
-                  </div>
-                  <div className="divide-y divide-altruistGray-200">
-                    {marketData.news.slice(0, 4).map((news, i) => (
-                      <a key={i} href={news.link} target="_blank" rel="noopener noreferrer" className="block px-6 py-4 hover:bg-altruistGray-50 transition-colors group">
-                        <p className="text-[14px] font-medium text-altruistDark group-hover:text-altruistBlue mb-1 leading-snug">{news.title}</p>
-                        <div className="flex items-center justify-between">
-                          <span className="text-[11px] font-bold text-altruistGray-500 uppercase tracking-wider">{news.publisher}</span>
-                          <ArrowRight className="w-3 h-3 text-altruistGray-400 group-hover:text-altruistBlue transition-colors" />
-                        </div>
-                      </a>
-                    ))}
-                  </div>
+                <div className="absolute inset-0 pointer-events-none overflow-hidden z-20">
+                  {marketData.news.slice(0, 5).map((item, i) => {
+                    // Pre-defined scattered aesthetic positions
+                    const positions = [
+                      { top: '22%', left: '8%' },
+                      { top: '15%', right: '12%' },
+                      { bottom: '25%', left: '10%' },
+                      { bottom: '15%', right: '8%' },
+                      { top: '55%', left: '65%', transform: 'translateY(-50%)' },
+                    ];
+                    const pos = positions[i] || {};
+                    return (
+                      <div key={i} className="absolute max-w-[320px] pointer-events-auto transition-transform hover:scale-105 duration-300 animate-fade-in-up" style={{ ...pos, animationDelay: `${i * 150}ms` }}>
+                        <a href={item.link} target="_blank" rel="noopener noreferrer" className="block bg-altruistWhite/70 backdrop-blur-md border border-altruistGray-200/50 p-5 shadow-lg hover:shadow-xl hover:bg-altruistWhite/90 transition-all rounded-sm">
+                          <div className="flex items-center gap-2 mb-2">
+                            <div className="w-1.5 h-1.5 rounded-full bg-altruistBlue"></div>
+                            <p className="text-[10px] font-bold text-altruistGray-500 uppercase tracking-widest">{item.publisher}</p>
+                          </div>
+                          <h3 className="text-[13px] font-medium text-altruistDark leading-snug">{item.title}</h3>
+                        </a>
+                      </div>
+                    )
+                  })}
                 </div>
               )}
             </div>
