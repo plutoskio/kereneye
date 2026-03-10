@@ -10,6 +10,7 @@ from crewai import Agent, Crew, Task, Process
 
 from data.collector import (
     CompanyData,
+    MarketBriefData,
     format_company_profile,
     format_financial_statements,
     format_ratios,
@@ -17,6 +18,7 @@ from data.collector import (
     format_news,
     format_premium_news,
     format_macro,
+    format_market_brief_context,
 )
 from tools.technical_tools import compute_technical_indicators, format_technical_summary
 from config import OPENAI_MODEL_NAME
@@ -482,6 +484,95 @@ def run_news_analysis_crew(data: CompanyData, progress_callback=None) -> str:
     )
 
     print("🚀 Running news analyst...\n")
+    result = crew.kickoff()
+
+    return str(result)
+
+
+def run_market_brief_crew(brief_data: MarketBriefData, progress_callback=None) -> str:
+    """
+    Run a standalone CrewAI agent that synthesizes the Daily Market & World Brief.
+    Takes broad market data (indices, headlines, macro, world news) and produces
+    a short, structured markdown summary.
+
+    Returns the final brief as a markdown string.
+    """
+    print("\n🌍 Initializing market brief crew...\n")
+
+    today = datetime.now().strftime("%B %d, %Y")
+
+    # Format all collected data into a single context block
+    context_block = format_market_brief_context(brief_data)
+
+    if progress_callback:
+        progress_callback("Analyzing Market Data")
+
+    strategist = Agent(
+        role="Chief Market Strategist",
+        goal=(
+            "Synthesize the latest market data, economic indicators, financial headlines, "
+            "and world events into a concise, structured daily briefing that gives an investor "
+            "a clear picture of what is happening right now and what to watch for."
+        ),
+        backstory=(
+            "You are the Chief Market Strategist at a top-tier investment advisory firm. "
+            "Every morning, your institutional clients rely on your briefing to understand "
+            "the state of global markets. You are known for being concise, data-driven, "
+            "and insightful — never vague or generic. You always reference specific numbers "
+            "and specific events. Your tone is authoritative but accessible."
+        ),
+        verbose=False,
+        allow_delegation=False,
+        llm=OPENAI_MODEL_NAME,
+    )
+
+    brief_task = Task(
+        description=f"""
+You are writing the Daily Market & World Brief for {today}.
+
+Using the data below, write a SHORT, structured briefing in markdown. 
+The briefing MUST follow this exact structure:
+
+## Market Pulse — {today}
+
+**Markets:** [1-2 sentences on index performance. Reference specific indices and their % moves. Identify the main driver behind today's moves.]
+
+**Macro:** [1-2 sentences on notable economic data or central bank activity. Reference specific numbers from the FRED data if relevant. If nothing notable, mention the current macro backdrop.]
+
+**World:** [1-2 sentences on geopolitical events that could affect markets. Be specific about countries, conflicts, trade policies, elections, etc.]
+
+**Outlook:** [1-2 sentences on what investors should watch for today/this week. Be actionable and specific.]
+
+RULES:
+- Keep the ENTIRE briefing under 200 words
+- Reference SPECIFIC numbers (percentages, index levels, rates)
+- Do NOT be vague or generic — every sentence must contain a concrete fact or insight
+- Do NOT use bullet points — write in flowing prose
+- Do NOT add any sections beyond the four above
+
+=== RAW DATA ===
+{context_block}
+""",
+        expected_output="A short, structured daily market brief in markdown format with exactly 4 sections: Markets, Macro, World, Outlook.",
+        agent=strategist,
+    )
+
+    if progress_callback:
+        progress_callback("Writing Daily Brief")
+
+    def task_completed_cb(output):
+        if progress_callback:
+            progress_callback("Formatting Output")
+
+    crew = Crew(
+        agents=[strategist],
+        tasks=[brief_task],
+        process=Process.sequential,
+        verbose=True,
+        task_callback=task_completed_cb,
+    )
+
+    print("🚀 Running Chief Market Strategist...\n")
     result = crew.kickoff()
 
     return str(result)

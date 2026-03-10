@@ -85,6 +85,16 @@ class CompanyData:
     errors: list = field(default_factory=list)
 
 
+@dataclass
+class MarketBriefData:
+    """Structured container for the daily market & world brief."""
+    indices: list = field(default_factory=list)        # [{name, price, change_pct}]
+    market_headlines: list = field(default_factory=list)  # Finnhub headlines
+    macro_snapshot: dict = field(default_factory=dict)   # FRED latest values
+    world_headlines: list = field(default_factory=list)   # GDELT headlines
+    errors: list = field(default_factory=list)
+
+
 # ---------------------------------------------------------------------------
 # Collector
 # ---------------------------------------------------------------------------
@@ -143,6 +153,135 @@ class DataCollector:
         print(f"{'='*60}\n")
 
         return data
+
+    def collect_market_brief_data(self) -> MarketBriefData:
+        """Collect broad market data for the Daily Market & World Brief (no ticker needed)."""
+        import time
+
+        print(f"\n{'='*60}")
+        print(f"  Collecting MARKET BRIEF data")
+        print(f"{'='*60}\n")
+
+        brief = MarketBriefData()
+
+        # 1. yfinance — Major indices
+        print("📡 Fetching index performance...")
+        index_map = {
+            "S&P 500": "^GSPC",
+            "Nasdaq": "^IXIC",
+            "FTSE 100": "^FTSE",
+            "CAC 40": "^FCHI",
+            "DAX": "^GDAXI",
+            "Nikkei 225": "^N225"
+        }
+        try:
+            tickers = yf.Tickers(" ".join(index_map.values()))
+            for name, symbol in index_map.items():
+                try:
+                    info = tickers.tickers[symbol].info
+                    if info:
+                        current = info.get("regularMarketPrice", info.get("previousClose", 0))
+                        prev = info.get("regularMarketPreviousClose", info.get("previousClose", 1))
+                        if current and prev:
+                            pct_change = ((current - prev) / prev) * 100
+                            brief.indices.append({
+                                "name": name,
+                                "price": round(current, 2),
+                                "change_pct": round(pct_change, 2)
+                            })
+                            print(f"  ✅ {name}: {current:.2f} ({pct_change:+.2f}%)")
+                except Exception as e:
+                    brief.errors.append(f"Index {symbol} failed: {e}")
+        except Exception as e:
+            brief.errors.append(f"yfinance indices failed: {e}")
+            print(f"  ⚠ Failed to fetch indices: {e}")
+
+        # 2. Finnhub — Top 20 market headlines
+        print("📡 Fetching Finnhub market headlines...")
+        if FINNHUB_API_KEY and FINNHUB_API_KEY != "your_finnhub_api_key_here":
+            try:
+                url = f"https://finnhub.io/api/v1/news?category=general&token={FINNHUB_API_KEY}"
+                response = requests.get(url, timeout=10)
+                if response.status_code == 200:
+                    news = response.json()
+                    for item in news[:20]:
+                        if item.get("headline"):
+                            brief.market_headlines.append({
+                                "headline": item.get("headline", ""),
+                                "source": item.get("source", "Unknown"),
+                                "summary": item.get("summary", "")[:300],
+                                "url": item.get("url", ""),
+                            })
+                    print(f"  ✅ {len(brief.market_headlines)} market headlines collected")
+                else:
+                    print(f"  ⚠ Finnhub returned status {response.status_code}")
+            except Exception as e:
+                brief.errors.append(f"Finnhub news failed: {e}")
+                print(f"  ⚠ Finnhub failed: {e}")
+        else:
+            print("  ⚠ Finnhub: Skipped (no API key)")
+
+        # 3. FRED — Macro snapshot
+        print("📡 Fetching FRED macro snapshot...")
+        if FRED_API_KEY and FRED_API_KEY != "your_fred_api_key_here":
+            try:
+                from fredapi import Fred
+                fred = Fred(api_key=FRED_API_KEY)
+                for label, series_id in FRED_SERIES.items():
+                    try:
+                        series = fred.get_series(series_id)
+                        latest = series.dropna().iloc[-1]
+                        brief.macro_snapshot[label] = {
+                            "value": float(latest),
+                            "date": str(series.dropna().index[-1].date()),
+                        }
+                        print(f"  ✅ {label}: {latest:.2f}")
+                    except Exception as e:
+                        brief.errors.append(f"FRED {label} failed: {e}")
+            except ImportError:
+                brief.errors.append("fredapi not installed")
+                print("  ⚠ fredapi not installed")
+        else:
+            print("  ⚠ FRED: Skipped (no API key)")
+
+        # 4. GDELT — World/geopolitical headlines (free, no API key)
+        print("📡 Fetching GDELT world headlines...")
+        try:
+            # GDELT DOC API — search for broad geopolitical/economic themes
+            gdelt_url = (
+                "https://api.gdeltproject.org/api/v2/doc/doc"
+                "?query=economy OR markets OR geopolitical OR trade OR war OR election"
+                "&mode=ArtList"
+                "&maxrecords=15"
+                "&timespan=1d"
+                "&format=json"
+                "&sort=HybridRel"
+            )
+            response = requests.get(gdelt_url, timeout=10)
+            if response.status_code == 200:
+                data_json = response.json()
+                articles = data_json.get("articles", [])
+                for article in articles:
+                    brief.world_headlines.append({
+                        "title": article.get("title", ""),
+                        "source": article.get("domain", "Unknown"),
+                        "url": article.get("url", ""),
+                        "seendate": article.get("seendate", ""),
+                    })
+                print(f"  ✅ {len(brief.world_headlines)} GDELT world headlines collected")
+            else:
+                print(f"  ⚠ GDELT returned status {response.status_code}")
+        except Exception as e:
+            brief.errors.append(f"GDELT failed: {e}")
+            print(f"  ⚠ GDELT failed: {e}")
+
+        print(f"\n{'='*60}")
+        print(f"  Market brief data collection complete")
+        if brief.errors:
+            print(f"  ⚠ {len(brief.errors)} non-critical error(s) occurred")
+        print(f"{'='*60}\n")
+
+        return brief
 
     # --- Step 1: yfinance ---------------------------------------------------
 
@@ -696,3 +835,49 @@ def format_company_profile(data: CompanyData) -> str:
         else f"  Description: {data.description}",
     ]
     return "\n".join(line for line in lines if line)
+
+
+def format_market_brief_context(brief: MarketBriefData) -> str:
+    """Format the MarketBriefData into a readable text block for the LLM agent."""
+    lines = []
+
+    # Indices
+    lines.append("=== INDEX PERFORMANCE ===")
+    for idx in brief.indices:
+        direction = "▲" if idx["change_pct"] >= 0 else "▼"
+        lines.append(f"  {idx['name']}: {idx['price']:,.2f} ({direction} {abs(idx['change_pct']):.2f}%)")
+    lines.append("")
+
+    # Macro
+    if brief.macro_snapshot:
+        lines.append("=== MACROECONOMIC SNAPSHOT ===")
+        labels = {
+            "GDP": "US GDP (billions)",
+            "FEDFUNDS": "Fed Funds Rate (%)",
+            "CPI": "CPI Index",
+            "UNEMPLOYMENT": "Unemployment Rate (%)",
+            "YIELD_SPREAD": "10Y-2Y Spread (%)",
+        }
+        for key, label in labels.items():
+            entry = brief.macro_snapshot.get(key)
+            if entry:
+                lines.append(f"  {label}: {entry['value']:.2f} (as of {entry['date']})")
+        lines.append("")
+
+    # Market Headlines
+    if brief.market_headlines:
+        lines.append("=== MARKET HEADLINES (Finnhub) ===")
+        for i, h in enumerate(brief.market_headlines, 1):
+            lines.append(f"  [{i}] {h['source']}: {h['headline']}")
+            if h.get('summary'):
+                lines.append(f"      {h['summary'][:200]}")
+        lines.append("")
+
+    # World Headlines
+    if brief.world_headlines:
+        lines.append("=== WORLD / GEOPOLITICAL HEADLINES (GDELT) ===")
+        for i, h in enumerate(brief.world_headlines, 1):
+            lines.append(f"  [{i}] {h['source']}: {h['title']}")
+        lines.append("")
+
+    return "\n".join(lines)

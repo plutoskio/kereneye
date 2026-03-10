@@ -22,6 +22,12 @@ function App() {
 
   const [marketData, setMarketData] = useState(null);
 
+  // Daily Market Brief state
+  const [marketBrief, setMarketBrief] = useState(null);
+  const [loadingBrief, setLoadingBrief] = useState(false);
+  const [briefStatus, setBriefStatus] = useState('');
+  const [briefCacheAge, setBriefCacheAge] = useState(0);
+
   useEffect(() => {
     let intervalId;
     if (loadingReport && companyData?.ticker) {
@@ -111,7 +117,53 @@ function App() {
       }
     };
     fetchMarketOverview();
+
+    // Also check the brief cache on load
+    const fetchBriefCache = async () => {
+      try {
+        const res = await fetch('http://localhost:8000/api/market/brief');
+        if (res.ok) {
+          const data = await res.json();
+          setMarketBrief(data.brief);
+          setBriefCacheAge(data.age_hours || 0);
+        }
+      } catch (err) {
+        console.error("Failed to fetch brief cache:", err);
+      }
+    };
+    fetchBriefCache();
   }, []);
+
+  const generateMarketBrief = async () => {
+    try {
+      setLoadingBrief(true);
+      setBriefStatus('Collecting Market Data');
+
+      // Start polling status
+      const statusInterval = setInterval(async () => {
+        try {
+          const statusRes = await fetch('http://localhost:8000/api/market/brief/status');
+          if (statusRes.ok) {
+            const statusData = await statusRes.json();
+            setBriefStatus(statusData.status || '');
+          }
+        } catch (e) { /* ignore */ }
+      }, 2000);
+
+      const res = await fetch('http://localhost:8000/api/market/brief', { method: 'POST' });
+      clearInterval(statusInterval);
+
+      if (!res.ok) throw new Error('Failed to generate brief.');
+      const data = await res.json();
+      setMarketBrief(data.brief);
+      setBriefCacheAge(0);
+    } catch (err) {
+      console.error(err);
+      setMarketBrief('Failed to generate daily brief.');
+    } finally {
+      setLoadingBrief(false);
+    }
+  };
 
   const fetchCompanyData = async (symbol) => {
     try {
@@ -308,6 +360,64 @@ function App() {
                   })}
                 </div>
               )}
+            </div>
+
+            {/* DAILY MARKET BRIEF */}
+            <div className="relative z-10 w-full px-6 pb-6">
+              <div className="bg-altruistWhite/85 backdrop-blur-md border border-altruistGray-200/50 rounded-sm shadow-lg overflow-hidden pointer-events-auto max-w-3xl mx-auto">
+                <div className="border-b border-altruistGray-200 px-6 py-3 flex justify-between items-center bg-altruistGray-50/80">
+                  <h3 className="text-[12px] font-bold text-altruistGray-800 uppercase tracking-wide flex items-center gap-2">
+                    <LayoutDashboard className="w-3.5 h-3.5 text-altruistBlue" /> Daily Market & World Brief
+                  </h3>
+                  <div className="flex items-center gap-3">
+                    {marketBrief && !loadingBrief && (
+                      <span className="text-[10px] font-medium text-altruistGray-400 uppercase tracking-widest">
+                        {briefCacheAge === 0 ? "Live" : `${briefCacheAge}h ago`}
+                      </span>
+                    )}
+                    {marketBrief && !loadingBrief && (
+                      <button
+                        onClick={generateMarketBrief}
+                        disabled={loadingBrief}
+                        className="text-[10px] font-bold text-altruistBlue uppercase tracking-widest hover:text-blue-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1 bg-altruistBlue/10 px-2.5 py-1 rounded-sm"
+                      >
+                        <RefreshCw className="w-3 h-3" />
+                        Refresh
+                      </button>
+                    )}
+                  </div>
+                </div>
+                <div className="p-5">
+                  {marketBrief ? (
+                    <div className="prose prose-sm max-w-none prose-slate
+                                    prose-headings:font-bold prose-headings:text-altruistDark prose-headings:tracking-tight
+                                    prose-h2:text-[15px] prose-h2:mt-0 prose-h2:mb-3 prose-h2:text-altruistBlue
+                                    prose-p:text-[13px] prose-p:leading-relaxed prose-p:text-altruistGray-800 prose-p:my-1.5
+                                    prose-strong:text-altruistDark">
+                      <ReactMarkdown>{marketBrief}</ReactMarkdown>
+                    </div>
+                  ) : loadingBrief ? (
+                    <div className="flex flex-col items-center justify-center py-6 animate-fade-in-up">
+                      <div className="w-10 h-10 rounded-full border-2 border-altruistBlue border-t-transparent animate-spin mb-3"></div>
+                      <p className="text-[13px] font-bold text-altruistDark tracking-wide">{briefStatus || 'Synthesizing Intelligence'}</p>
+                      <p className="text-[11px] text-altruistGray-500 font-medium mt-1">Analyzing Finnhub, FRED, GDELT sources...</p>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-center justify-center py-6">
+                      <p className="text-[13px] font-medium text-altruistGray-600 mb-4 text-center">
+                        Get today's AI-generated summary of global markets, macro data, and world events.
+                      </p>
+                      <button
+                        onClick={generateMarketBrief}
+                        className="bg-altruistBlue text-white px-5 py-2 rounded-sm text-[12px] font-bold uppercase tracking-wide hover:bg-blue-800 transition-colors flex items-center gap-2"
+                      >
+                        <Activity className="w-3.5 h-3.5" />
+                        Generate Daily Brief
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
           </div>
         ) : (

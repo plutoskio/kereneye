@@ -16,8 +16,8 @@ import config
 
 from datetime import datetime, timedelta
 
-from data.collector import DataCollector
-from crew.research_crew import run_research_crew, run_news_analysis_crew
+from data.collector import DataCollector, MarketBriefData
+from crew.research_crew import run_research_crew, run_news_analysis_crew, run_market_brief_crew
 
 app = FastAPI(title="KerenEye API Dashboard")
 
@@ -25,9 +25,11 @@ app = FastAPI(title="KerenEye API Dashboard")
 CACHE_DIR = os.path.join(os.path.dirname(__file__), "cache")
 REPORTS_CACHE_DIR = os.path.join(CACHE_DIR, "reports")
 NEWS_CACHE_DIR = os.path.join(CACHE_DIR, "news")
+BRIEFS_CACHE_DIR = os.path.join(CACHE_DIR, "briefs")
 
 os.makedirs(REPORTS_CACHE_DIR, exist_ok=True)
 os.makedirs(NEWS_CACHE_DIR, exist_ok=True)
+os.makedirs(BRIEFS_CACHE_DIR, exist_ok=True)
 
 # Enable CORS for the React frontend
 app.add_middleware(
@@ -54,6 +56,7 @@ _cache = {}
 # Global dictionary to store the current generation status for a given ticker
 _task_status = {}
 _news_task_status = {}
+_brief_task_status = {"status": "Not Started"}
 
 @app.get("/api/company/{ticker}", response_model=CompanyResponse)
 async def get_company_data(ticker: str):
@@ -260,6 +263,76 @@ async def get_news_status(ticker: str):
     """
     ticker = ticker.upper()
     return {"status": _news_task_status.get(ticker, "Not Started")}
+
+
+@app.get("/api/market/brief")
+async def get_market_brief_cache():
+    """
+    Checks if a valid, unexpired Daily Market Brief exists.
+    Returns the brief if < 24 hours old. Otherwise returns null.
+    """
+    cache_file = os.path.join(BRIEFS_CACHE_DIR, "daily.json")
+    
+    if os.path.exists(cache_file):
+        try:
+            with open(cache_file, "r") as f:
+                cached_data = json.load(f)
+            
+            timestamp = datetime.fromisoformat(cached_data["timestamp"])
+            age = datetime.now() - timestamp
+            
+            if age < timedelta(hours=24):
+                age_hours = int(age.total_seconds() / 3600)
+                return {"brief": cached_data["analysis"], "cached": True, "age_hours": age_hours}
+        except Exception as e:
+            print(f"Error reading brief cache: {e}")
+            
+    return {"brief": None, "cached": False, "age_hours": 0}
+
+
+@app.post("/api/market/brief")
+async def generate_market_brief():
+    """
+    Triggers the data collection and AI agent to generate a new Daily Market & World Brief.
+    Saves the result to persistent cache.
+    """
+    _brief_task_status["status"] = "Collecting Market Data"
+    
+    try:
+        collector = DataCollector()
+        brief_data = await asyncer.asyncify(collector.collect_market_brief_data)()
+    except Exception as e:
+        _brief_task_status["status"] = f"Error: Data collection failed"
+        raise HTTPException(status_code=500, detail=str(e))
+
+    def progress_callback(status: str):
+        _brief_task_status["status"] = status
+
+    try:
+        brief_markdown = await asyncer.asyncify(run_market_brief_crew)(brief_data, progress_callback)
+    except Exception as e:
+        _brief_task_status["status"] = f"Error: Agent failed"
+        raise HTTPException(status_code=500, detail=str(e))
+        
+    _brief_task_status["status"] = "Complete"
+    
+    # Save to persistent cache
+    cache_file = os.path.join(BRIEFS_CACHE_DIR, "daily.json")
+    with open(cache_file, "w") as f:
+        json.dump({
+            "timestamp": datetime.now().isoformat(),
+            "analysis": brief_markdown
+        }, f)
+        
+    return {"brief": brief_markdown, "cached": False, "age_hours": 0}
+
+
+@app.get("/api/market/brief/status")
+async def get_market_brief_status():
+    """
+    Returns the current generation status for the daily brief.
+    """
+    return _brief_task_status
 
 
 @app.get("/api/market/overview")
