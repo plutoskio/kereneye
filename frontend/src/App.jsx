@@ -271,7 +271,10 @@ function App() {
       {/* GLOBAL HEADER */}
       <header className="border-b border-altruistGray-200 bg-altruistWhite px-8 h-16 sticky top-0 z-50 flex items-center justify-between shadow-sm">
         <div className="flex items-center gap-6">
-          <h1 className="text-xl font-bold tracking-tight text-altruistDark flex items-center gap-3">
+          <h1
+            onClick={() => { setCompanyData(null); setReport(null); setNewsAnalysis(null); setTicker(''); setError(null); }}
+            className="text-xl font-bold tracking-tight text-altruistDark flex items-center gap-3 cursor-pointer hover:opacity-70 transition-opacity"
+          >
             KerenEye
             <span className="text-altruistGray-300 font-normal">|</span>
             <span className="text-altruistGray-500 font-medium">Advisory Intelligence</span>
