@@ -23,7 +23,12 @@ from config import (
     FRED_SERIES,
     MAX_PEERS,
     PRICE_HISTORY_PERIOD,
+    BENZINGA_API_KEY,
+    MASSIVE_API_KEY,
 )
+
+import requests
+from datetime import datetime, timedelta
 
 warnings.filterwarnings("ignore", category=FutureWarning)
 
@@ -73,6 +78,9 @@ class CompanyData:
     # Macro
     macro_data: dict = field(default_factory=dict)
 
+    # Premium News
+    recent_news: list = field(default_factory=list)
+
     # Metadata
     errors: list = field(default_factory=list)
 
@@ -89,17 +97,32 @@ class DataCollector:
         collector = DataCollector()
         data = collector.collect("AAPL")
     """
-
-    def collect(self, ticker_symbol: str) -> CompanyData:
-        """Collect all data for the given ticker. Returns a CompanyData object."""
+    def collect_core_data(self, ticker_symbol: str) -> CompanyData:
+        """Collect ONLY the core data needed for initial UI rendering (charts, metrics)."""
         print(f"\n{'='*60}")
-        print(f"  Collecting data for: {ticker_symbol.upper()}")
+        print(f"  Collecting CORE data for: {ticker_symbol.upper()}")
         print(f"{'='*60}\n")
 
         data = CompanyData(ticker=ticker_symbol.upper())
 
-        # Step 1: yfinance — primary data source
+        # Step 1: yfinance — primary data source (prices, financials, ratios)
         self._fetch_yfinance_data(data)
+
+        print(f"\n{'='*60}")
+        print(f"  Core data collection complete for {data.name or data.ticker}")
+        if data.errors:
+            print(f"  ⚠ {len(data.errors)} non-critical error(s) occurred")
+        print(f"{'='*60}\n")
+
+        return data
+
+    def collect_full_data(self, data: CompanyData) -> CompanyData:
+        """Collect the remaining heavy data needed for AI agents."""
+        print(f"\n{'='*60}")
+        print(f"  Collecting FULL data for: {data.ticker}")
+        print(f"{'='*60}\n")
+
+        # Skip Step 1 since it was already done in collect_core_data
 
         # Step 2: Finnhub — peer discovery
         self._fetch_peers(data)
@@ -109,6 +132,9 @@ class DataCollector:
 
         # Step 4: FRED — macro context
         self._fetch_macro_data(data)
+        
+        # Step 5: Premium News (Benzinga / Polygon)
+        self._fetch_premium_news(data)
 
         print(f"\n{'='*60}")
         print(f"  Data collection complete for {data.name or data.ticker}")
@@ -348,6 +374,89 @@ class DataCollector:
             data.errors.append("fredapi not installed")
             print("  ⚠ fredapi not installed — skipping macro data")
 
+    # --- Step 5: Premium News -----------------------------------------------
+
+    def _fetch_premium_news(self, data: CompanyData) -> None:
+        """Fetch recent news from Benzinga and Polygon, avoiding Yahoo Finance."""
+        print("📡 Fetching premium news (Benzinga/Polygon)...")
+        
+        # Determine the date range (last 7 days)
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=7)
+        
+        start_str = start_date.strftime("%Y-%m-%d")
+        end_str = end_date.strftime("%Y-%m-%d")
+
+        news_items = []
+
+        # 1. Fetch from Benzinga
+        if BENZINGA_API_KEY and BENZINGA_API_KEY != "your_benzinga_api_key_here":
+            try:
+                url = f"https://api.benzinga.com/api/v2/news?token={BENZINGA_API_KEY}&tickers={data.ticker}&dateFrom={start_str}&dateTo={end_str}"
+                response = requests.get(url, timeout=5)
+                if response.status_code == 200:
+                    articles = response.json()
+                    for article in articles:
+                        # Append unique articles
+                        if not any(a.get("title") == article.get("title") for a in news_items):
+                            news_items.append({
+                                "title": article.get("title", ""),
+                                "publisher": "Benzinga",
+                                "link": article.get("url", ""),
+                                "published": article.get("created", ""),
+                                "teaser": article.get("teaser", "")
+                            })
+                    print(f"  ✅ Benzinga: {len(articles)} articles found.")
+                else:
+                    data.errors.append(f"Benzinga API failed with status {response.status_code}")
+                    print(f"  ⚠ Benzinga failed: {response.status_code}")
+            except Exception as e:
+                data.errors.append(f"Benzinga news fetch failed: {e}")
+                print(f"  ⚠ Benzinga failed: {e}")
+        else:
+            print("  ⚠ Skipped Benzinga (No API Key)")
+
+        # 2. Fetch from Polygon (Massive)
+        if MASSIVE_API_KEY and MASSIVE_API_KEY != "your_massive_api_key_here":
+            try:
+                # Polygon rate limit is 5 / min. Wrap in try/except for 429
+                url = f"https://api.polygon.io/v2/reference/news?ticker={data.ticker}&published_utc.gte={start_str}&limit=20&apiKey={MASSIVE_API_KEY}"
+                response = requests.get(url, timeout=5)
+                
+                if response.status_code == 200:
+                    articles = response.json().get("results", [])
+                    added_polygon_count = 0
+                    for article in articles:
+                        publisher_name = article.get("publisher", {}).get("name", "")
+                        # Explicitly filter out Yahoo Finance if it slips in via aggregators
+                        if "yahoo" in publisher_name.lower():
+                            continue
+                            
+                        # Avoid exact title duplicates from Benzinga
+                        if not any(a.get("title") == article.get("title") for a in news_items):
+                            news_items.append({
+                                "title": article.get("title", ""),
+                                "publisher": publisher_name,
+                                "link": article.get("article_url", ""),
+                                "published": article.get("published_utc", ""),
+                                "teaser": article.get("description", "")
+                            })
+                            added_polygon_count += 1
+                    print(f"  ✅ Polygon: {added_polygon_count} articles added.")
+                elif response.status_code == 429:
+                    print("  ⚠ Polygon: Rate limited (429). Falling back to Benzinga data only.")
+                else:
+                    data.errors.append(f"Polygon API failed with status {response.status_code}")
+                    print(f"  ⚠ Polygon failed: {response.status_code}")
+            except Exception as e:
+                data.errors.append(f"Polygon news fetch failed: {e}")
+                print(f"  ⚠ Polygon failed: {e}")
+        else:
+            print("  ⚠ Skipped Polygon (No API Key)")
+            
+        # Sort combined news generically by published date descending (newest first)
+        news_items.sort(key=lambda x: x.get("published", ""), reverse=True)
+        data.recent_news = news_items
 
 # ---------------------------------------------------------------------------
 # Formatting helpers (used by agents to read data)
@@ -521,7 +630,7 @@ def format_peer_comparison(data: CompanyData) -> str:
 
 
 def format_news(data: CompanyData) -> str:
-    """Format news articles as readable text for LLM agents."""
+    """Format news articles (Standard yfinance news) as readable text for LLM agents."""
     if not data.news:
         return "No recent news available."
 
@@ -531,6 +640,22 @@ def format_news(data: CompanyData) -> str:
         lines.append(f"     Source: {article['publisher']}")
     return "\n".join(lines)
 
+
+def format_premium_news(data: CompanyData) -> str:
+    """Format premium news articles (Benzinga/Polygon) specifically for the News Analyst."""
+    if not data.recent_news:
+        return "No premium news available for the last 7 days."
+
+    lines = ["=== RECENT PREMIUM NEWS (LAST 7 DAYS) ==="]
+    for i, article in enumerate(data.recent_news, 1):
+        lines.append(f"  [{i}] {article['published']} | SOURCE: {article['publisher']}")
+        lines.append(f"      HEADLINE: {article['title']}")
+        if article.get('teaser'):
+            # Truncate teaser to avoid massive context
+            teaser = article['teaser'][:300] + ("..." if len(article['teaser']) > 300 else "")
+            lines.append(f"      SUMMARY: {teaser}")
+        lines.append("")
+    return "\n".join(lines)
 
 def format_macro(data: CompanyData) -> str:
     """Format macro data as readable text for LLM agents."""

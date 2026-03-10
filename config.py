@@ -14,6 +14,8 @@ FINNHUB_API_KEY = os.getenv("FINNHUB_API_KEY", "")
 FRED_API_KEY = os.getenv("FRED_API_KEY", "")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 OPENAI_MODEL_NAME = os.getenv("OPENAI_MODEL_NAME", "gpt-4o-mini")
+BENZINGA_API_KEY = os.getenv("BENZINGA_API_KEY", "")
+MASSIVE_API_KEY = os.getenv("MASSIVE_API_KEY", "")
 
 # --- Data Collection Settings ---
 PRICE_HISTORY_PERIOD = "5y"        # How far back to fetch price data

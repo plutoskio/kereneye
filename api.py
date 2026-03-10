@@ -7,15 +7,27 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import uvicorn
+import os
+import json
 import asyncer
 import yfinance as yf
 import requests
 import config
 
+from datetime import datetime, timedelta
+
 from data.collector import DataCollector
-from crew.research_crew import run_research_crew
+from crew.research_crew import run_research_crew, run_news_analysis_crew
 
 app = FastAPI(title="KerenEye API Dashboard")
+
+# --- Setup Persistent Caching Directories ---
+CACHE_DIR = os.path.join(os.path.dirname(__file__), "cache")
+REPORTS_CACHE_DIR = os.path.join(CACHE_DIR, "reports")
+NEWS_CACHE_DIR = os.path.join(CACHE_DIR, "news")
+
+os.makedirs(REPORTS_CACHE_DIR, exist_ok=True)
+os.makedirs(NEWS_CACHE_DIR, exist_ok=True)
 
 # Enable CORS for the React frontend
 app.add_middleware(
@@ -36,23 +48,23 @@ class CompanyResponse(BaseModel):
     ratios: dict
     price_history: list[dict] # Formatted for the frontend chart
 
-# Keep a simple in-memory cache to avoid re-fetching identical data
-# in the time between the frontend hitting /company and then /research
+# Keep a simple in-memory session cache
 _cache = {}
 
 # Global dictionary to store the current generation status for a given ticker
 _task_status = {}
+_news_task_status = {}
 
 @app.get("/api/company/{ticker}", response_model=CompanyResponse)
 async def get_company_data(ticker: str):
     """
-    Instantly fetch the raw company data and price history to populate the frontend dashboard.
+    Instantly fetch the raw core company data and price history to populate the frontend dashboard.
     """
     ticker = ticker.upper()
     collector = DataCollector()
     
-    # Run the synchronous collector logic in an async worker thread
-    data = await asyncer.asyncify(collector.collect)(ticker)
+    # Run ONLY the fast core logic (YFinance)
+    data = await asyncer.asyncify(collector.collect_core_data)(ticker)
     
     if not data.name or data.name == ticker:
         raise HTTPException(status_code=404, detail="Company data not found")
@@ -84,37 +96,78 @@ async def get_company_data(ticker: str):
 
 
 @app.get("/api/research/{ticker}")
-async def get_research_report(ticker: str):
+async def get_research_report_cache(ticker: str):
     """
-    Triggers the CrewAI agent orchestration to generate the equity research report.
-    Returns the final markdown. Always re-runs the agents to ensure fresh analysis if 
-    the user queries it again.
+    Checks if a valid, unexpired Executive Dossier exists.
+    Returns the report if < 30 days old. Otherwise returns null.
     """
     ticker = ticker.upper()
+    cache_file = os.path.join(REPORTS_CACHE_DIR, f"{ticker}.json")
     
-    # Initialize status
-    _task_status[ticker] = "Collecting Data"
+    if os.path.exists(cache_file):
+        try:
+            with open(cache_file, "r") as f:
+                cached_data = json.load(f)
+            
+            timestamp = datetime.fromisoformat(cached_data["timestamp"])
+            age = datetime.now() - timestamp
+            
+            if age < timedelta(days=30):
+                return {"report": cached_data["analysis"], "cached": True, "age_days": age.days}
+        except Exception as e:
+            print(f"Error reading cache for {ticker}: {e}")
+            
+    # Explicitly return null if it's expired or doesn't exist
+    return {"report": None, "cached": False, "age_days": 0}
+
+
+@app.post("/api/research/{ticker}")
+async def generate_research_report(ticker: str):
+    """
+    Triggers the deep data collection and crew AI agents to generate a new Executive Dossier.
+    Saves the result to persistent cache.
+    """
+    ticker = ticker.upper()
+    _task_status[ticker] = "Collecting Full Data"
     
-    # Check if we already have the raw data cached from the /company endpoint
-    # to save time calling YFinance again.
-    if ticker in _cache:
-        data = _cache[ticker]
-    else:
-        collector = DataCollector()
-        data = await asyncer.asyncify(collector.collect)(ticker)
+    try:
+        if ticker in _cache:
+            data = _cache[ticker]
+        else:
+            collector = DataCollector()
+            data = await asyncer.asyncify(collector.collect_core_data)(ticker)
         
+        # Now run the heavy data fetching (Finnhub peers, FRED macro, etc)
+        collector = DataCollector()
+        data = await asyncer.asyncify(collector.collect_full_data)(data)
+
         if not data.name or data.name == ticker:
             _task_status[ticker] = "Error: Company not found"
             raise HTTPException(status_code=404, detail="Company data not found")
+            
+    except Exception as e:
+        _task_status[ticker] = f"Error: Data collection failed"
+        raise HTTPException(status_code=500, detail=str(e))
 
     def progress_callback(status: str):
         _task_status[ticker] = status
 
-    # Run the heavy CrewAI logic in a background async worker
-    # We never cache the final report string, so querying twice gives a fresh generation.
-    report_markdown = await asyncer.asyncify(run_research_crew)(data, progress_callback)
-    
+    try:
+        report_markdown = await asyncer.asyncify(run_research_crew)(data, progress_callback)
+    except Exception as e:
+        _task_status[ticker] = f"Error: Agent failed"
+        raise HTTPException(status_code=500, detail=str(e))
+        
     _task_status[ticker] = "Complete"
+    
+    # Save to persistent cache
+    cache_file = os.path.join(REPORTS_CACHE_DIR, f"{ticker}.json")
+    with open(cache_file, "w") as f:
+        json.dump({
+            "timestamp": datetime.now().isoformat(),
+            "analysis": report_markdown
+        }, f)
+        
     return {"report": report_markdown}
 
 @app.get("/api/research/status/{ticker}")
@@ -124,6 +177,89 @@ async def get_research_status(ticker: str):
     """
     ticker = ticker.upper()
     return {"status": _task_status.get(ticker, "Not Started")}
+
+
+@app.get("/api/news_analysis/{ticker}")
+async def get_news_analysis_cache(ticker: str):
+    """
+    Checks if a valid, unexpired News Analysis exists.
+    Returns the analysis if < 7 days old. Otherwise returns null.
+    """
+    ticker = ticker.upper()
+    cache_file = os.path.join(NEWS_CACHE_DIR, f"{ticker}.json")
+    
+    if os.path.exists(cache_file):
+        try:
+            with open(cache_file, "r") as f:
+                cached_data = json.load(f)
+            
+            timestamp = datetime.fromisoformat(cached_data["timestamp"])
+            age = datetime.now() - timestamp
+            
+            if age < timedelta(days=7):
+                return {"news_analysis": cached_data["analysis"], "cached": True, "age_days": age.days}
+        except Exception as e:
+            print(f"Error reading news cache for {ticker}: {e}")
+            
+    return {"news_analysis": None, "cached": False, "age_days": 0}
+
+
+@app.post("/api/news_analysis/{ticker}")
+async def generate_news_analysis(ticker: str):
+    """
+    Triggers the deep data collection and news crew to generate a new News Analysis.
+    Saves the result to persistent cache.
+    """
+    ticker = ticker.upper()
+    _news_task_status[ticker] = "Collecting Premium News"
+    
+    try:
+        if ticker in _cache:
+            data = _cache[ticker]
+        else:
+            collector = DataCollector()
+            data = await asyncer.asyncify(collector.collect_core_data)(ticker)
+            
+        # Re-collect full data to ensure premium news is fetched
+        collector = DataCollector()
+        data = await asyncer.asyncify(collector.collect_full_data)(data)
+        
+        if not data.name or data.name == ticker:
+            _news_task_status[ticker] = "Error: Company not found"
+            raise HTTPException(status_code=404, detail="Company data not found")
+            
+    except Exception as e:
+        _news_task_status[ticker] = f"Error: Data collection failed"
+        raise HTTPException(status_code=500, detail=str(e))
+
+    def progress_callback(status: str):
+        _news_task_status[ticker] = status
+
+    try:
+        analysis_markdown = await asyncer.asyncify(run_news_analysis_crew)(data, progress_callback)
+    except Exception as e:
+        _news_task_status[ticker] = f"Error: Agent failed"
+        raise HTTPException(status_code=500, detail=str(e))
+        
+    _news_task_status[ticker] = "Complete"
+    
+    # Save to persistent cache
+    cache_file = os.path.join(NEWS_CACHE_DIR, f"{ticker}.json")
+    with open(cache_file, "w") as f:
+        json.dump({
+            "timestamp": datetime.now().isoformat(),
+            "analysis": analysis_markdown
+        }, f)
+        
+    return {"news_analysis": analysis_markdown, "cached": False, "age_days": 0}
+
+@app.get("/api/news_analysis/status/{ticker}")
+async def get_news_status(ticker: str):
+    """
+    Returns the current status of the premium news analysis generation.
+    """
+    ticker = ticker.upper()
+    return {"status": _news_task_status.get(ticker, "Not Started")}
 
 
 @app.get("/api/market/overview")

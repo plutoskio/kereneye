@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import ReactMarkdown from 'react-markdown';
-import { Search, ShieldAlert, TrendingUp, TrendingDown, Newspaper, ArrowRight, Database, DollarSign, Scale, Users, Activity, Target, FileText, CheckCircle2, Loader2 } from 'lucide-react';
+import { Search, ShieldAlert, TrendingUp, TrendingDown, Newspaper, ArrowRight, Database, DollarSign, Scale, Users, Activity, Target, FileText, CheckCircle2, Loader2, RefreshCw, LayoutDashboard } from 'lucide-react';
 import Background3D from './Background3D';
 import './index.css';
 
@@ -14,6 +14,11 @@ function App() {
   const [companyData, setCompanyData] = useState(null);
   const [report, setReport] = useState(null);
   const [reportStatus, setReportStatus] = useState('');
+
+  const [newsAnalysis, setNewsAnalysis] = useState(null);
+  const [loadingNews, setLoadingNews] = useState(false);
+  const [newsStatus, setNewsStatus] = useState('');
+  const [newsCacheAge, setNewsCacheAge] = useState(0);
 
   const [marketData, setMarketData] = useState(null);
 
@@ -28,7 +33,7 @@ function App() {
             setReportStatus(data.status);
           }
         } catch (err) {
-          console.error("Polling error", err);
+            // ignore
         }
       };
       poll();
@@ -38,6 +43,28 @@ function App() {
     }
     return () => clearInterval(intervalId);
   }, [loadingReport, companyData]);
+
+  useEffect(() => {
+    let intervalId;
+    if (loadingNews && companyData?.ticker) {
+      const poll = async () => {
+        try {
+          const res = await fetch(`http://localhost:8000/api/news_analysis/status/${companyData.ticker}`);
+          if (res.ok) {
+            const data = await res.json();
+            setNewsStatus(data.status);
+          }
+        } catch (err) {
+            // ignore
+        }
+      };
+      poll();
+      intervalId = setInterval(poll, 1000);
+    } else if (!loadingNews) {
+      setNewsStatus('');
+    }
+    return () => clearInterval(intervalId);
+  }, [loadingNews, companyData]);
 
   const REPORT_STEPS = [
     { id: "Collecting Data", label: "Data Collection", icon: Database },
@@ -98,10 +125,22 @@ function App() {
     }
   };
 
-  const fetchResearchReport = async (symbol) => {
+  const fetchResearchReportCache = async (symbol) => {
+    try {
+      const res = await fetch(`http://localhost:8000/api/research/${symbol}`);
+      if (res.ok) {
+        const data = await res.json();
+        setReport(data.report);
+      }
+    } catch (err) {
+      console.error("Cache fetch failed:", err);
+    }
+  };
+
+  const generateResearchReport = async (symbol) => {
     try {
       setLoadingReport(true);
-      const res = await fetch(`http://localhost:8000/api/research/${symbol}`);
+      const res = await fetch(`http://localhost:8000/api/research/${symbol}`, { method: 'POST' });
       if (!res.ok) throw new Error('Failed to generate report.');
       const data = await res.json();
       setReport(data.report);
@@ -109,6 +148,35 @@ function App() {
       setError(err.message);
     } finally {
       setLoadingReport(false);
+    }
+  };
+
+  const fetchNewsAnalysisCache = async (symbol) => {
+    try {
+      const res = await fetch(`http://localhost:8000/api/news_analysis/${symbol}`);
+      if (res.ok) {
+        const data = await res.json();
+        setNewsAnalysis(data.news_analysis);
+        setNewsCacheAge(data.age_days || 0);
+      }
+    } catch (err) {
+      console.error("News cache fetch failed:", err);
+    }
+  };
+
+  const generateNewsAnalysis = async (symbol) => {
+    try {
+      setLoadingNews(true);
+      const res = await fetch(`http://localhost:8000/api/news_analysis/${symbol}`, { method: 'POST' });
+      if (!res.ok) throw new Error('Failed to generate news analysis.');
+      const data = await res.json();
+      setNewsAnalysis(data.news_analysis);
+      setNewsCacheAge(0); // It's fresh
+    } catch (err) {
+      console.error(err);
+      setNewsAnalysis("Failed to load news analysis.");
+    } finally {
+      setLoadingNews(false);
     }
   };
 
@@ -127,7 +195,9 @@ function App() {
     setLoadingInitial(false);
 
     if (!error) {
-      fetchResearchReport(symbol);
+      // Just check the caches, don't auto-generate. The UI handles the null states.
+      fetchResearchReportCache(symbol);
+      fetchNewsAnalysisCache(symbol);
     }
   };
 
@@ -297,8 +367,65 @@ function App() {
                 </div>
               </div>
 
+              {/* RECENT NEWS ANALYSIS */}
+              <div className="panel-structured mt-8 overflow-hidden bg-altruistWhite flex flex-col xl:h-[500px]">
+                <div className="border-b border-altruistGray-200 px-6 py-4 flex justify-between items-center bg-altruistGray-50">
+                  <h3 className="text-[13px] font-bold text-altruistGray-800 uppercase tracking-wide flex items-center gap-2">
+                    <Newspaper className="w-4 h-4 text-altruistBlue" /> Recent News Analysis
+                  </h3>
+                  <div className="flex items-center gap-4">
+                    {newsAnalysis && !loadingNews && (
+                      <span className="text-[11px] font-medium text-altruistGray-400 uppercase tracking-widest">
+                        {newsCacheAge === 0 ? "Live" : `${newsCacheAge}d ago`}
+                      </span>
+                    )}
+                    {newsAnalysis && (
+                        <button
+                          onClick={() => generateNewsAnalysis(companyData.ticker)}
+                          disabled={loadingNews || loadingInitial}
+                          className="text-[11px] font-bold text-altruistBlue uppercase tracking-widest hover:text-blue-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1 bg-altruistBlue/10 px-3 py-1.5 rounded-sm"
+                        >
+                          {loadingNews ? <Loader2 className="w-3 h-3 animate-spin" /> : <Activity className="w-3 h-3" />}
+                          Refresh
+                        </button>
+                    )}
+                  </div>
+                </div>
+                <div className="p-6 overflow-y-auto custom-scrollbar flex-1 relative">
+                  {newsAnalysis ? (
+                    <div className="prose prose-sm max-w-none prose-slate
+                                    prose-headings:font-bold prose-headings:text-altruistDark prose-headings:tracking-tight
+                                    prose-h3:text-[15px] prose-h3:uppercase prose-h3:mt-0 prose-h3:mb-3 prose-h3:text-altruistBlue
+                                    prose-p:text-[14px] prose-p:leading-relaxed prose-p:text-altruistGray-800
+                                    prose-li:text-[14px] prose-li:text-altruistGray-800">
+                      <ReactMarkdown>{newsAnalysis}</ReactMarkdown>
+                    </div>
+                  ) : loadingNews ? (
+                    <div className="h-full flex flex-col items-center justify-center animate-fade-in-up">
+                      <div className="w-12 h-12 rounded-full border-2 border-altruistBlue border-t-transparent animate-spin mb-4"></div>
+                      <p className="text-[14px] font-bold text-altruistDark tracking-wide">{newsStatus || "Synthesizing Premium Coverage"}</p>
+                      <p className="text-[12px] text-altruistGray-500 font-medium mt-1">Filtering Benzinga & Polygon signals...</p>
+                    </div>
+                  ) : (
+                    <div className="h-full flex flex-col items-center justify-center p-8 bg-altruistGray-50 rounded-sm border border-altruistGray-200">
+                      <Newspaper className="w-8 h-8 text-altruistBlue mb-4 opacity-50" />
+                      <p className="text-[14px] font-medium text-altruistGray-800 mb-6 text-center">
+                        Generate a fresh analysis of the past 7 days of news from premium feeds (Benzinga & Polygon).
+                      </p>
+                      <button 
+                        onClick={() => generateNewsAnalysis(companyData.ticker)}
+                        className="bg-altruistBlue text-white px-6 py-2.5 rounded-sm text-[13px] font-bold uppercase tracking-wide hover:bg-blue-800 transition-colors flex items-center gap-2"
+                      >
+                         <Activity className="w-4 h-4" />
+                         Generate Weekly News Analysis
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+
               {/* STATS DOSSIER */}
-              <div className="panel-structured overflow-hidden">
+              <div className="panel-structured mt-8 overflow-hidden">
                 <div className="border-b border-altruistGray-200 px-6 py-4 bg-altruistGray-50">
                   <h3 className="text-[13px] font-bold text-altruistGray-800 uppercase tracking-wide">Fundamental Metrics</h3>
                 </div>
@@ -340,12 +467,25 @@ function App() {
               <div className="panel-structured h-full xl:h-[calc(100vh-8rem)] flex flex-col overflow-hidden xl:sticky xl:top-24 bg-altruistWhite">
                 <div className="border-b border-altruistGray-200 px-6 py-4 flex justify-between items-center bg-altruistGray-50 z-10">
                   <h3 className="text-[13px] font-bold text-altruistGray-800 uppercase tracking-wide">Executive Dossier</h3>
-                  {loadingReport && (
-                    <span className="text-altruistBlue text-[12px] font-medium flex items-center gap-2">
-                      <div className="w-2 h-2 bg-altruistBlue animate-pulse rounded-full" />
-                      {reportStatus || 'Initializing...'}
-                    </span>
-                  )}
+                  
+                  <div className="flex items-center gap-4">
+                    {loadingReport && (
+                      <span className="text-altruistBlue text-[12px] font-medium flex items-center gap-2">
+                        <div className="w-2 h-2 bg-altruistBlue animate-pulse rounded-full" />
+                        {reportStatus || 'Initializing...'}
+                      </span>
+                    )}
+                    {report && !loadingReport && (
+                      <button
+                        onClick={() => generateResearchReport(companyData.ticker)}
+                        disabled={loadingReport || loadingInitial}
+                        className="text-[11px] font-bold text-altruistBlue uppercase tracking-widest hover:text-blue-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1 bg-altruistBlue/10 px-3 py-1.5 rounded-sm"
+                      >
+                        <RefreshCw className="w-3 h-3" />
+                        Refresh
+                      </button>
+                    )}
+                  </div>
                 </div>
 
                 <div className="p-8 overflow-y-auto custom-scrollbar flex-1">
@@ -385,7 +525,7 @@ function App() {
                             {/* Vertical connecting line */}
                             <div className="absolute left-[19px] top-6 bottom-6 w-[2px] bg-altruistGray-100 z-0"></div>
 
-                            {REPORT_STEPS.map((step, index) => {
+                             {REPORT_STEPS.map((step, index) => {
                               const { isCompleted, isActive, isPending } = getStepState(index, reportStatus);
                               
                               const Icon = step.icon;
@@ -420,8 +560,18 @@ function App() {
                       </div>
                     )
                   ) : (
-                    <div className="h-full flex flex-col items-center justify-center text-altruistGray-400">
-                      <p className="text-[13px] font-medium uppercase tracking-widest text-center">Analysis pending<br />Search a ticker to synthesize report</p>
+                    <div className="h-full flex flex-col items-center justify-center p-8 bg-altruistGray-50 rounded-sm border border-altruistGray-200">
+                      <LayoutDashboard className="w-8 h-8 text-altruistBlue mb-4 opacity-50" />
+                      <p className="text-[14px] font-medium text-altruistGray-800 mb-6 text-center">
+                        Generate a comprehensive 30-day Executive Dossier using the multi-agent AI protocol.
+                      </p>
+                      <button 
+                        onClick={() => generateResearchReport(companyData.ticker)}
+                        className="bg-altruistBlue text-white px-6 py-2.5 rounded-sm text-[13px] font-bold uppercase tracking-wide hover:bg-blue-800 transition-colors flex items-center gap-2 shadow-sm"
+                      >
+                         <Activity className="w-4 h-4" />
+                         Generate Executive Dossier
+                      </button>
                     </div>
                   )}
                 </div>

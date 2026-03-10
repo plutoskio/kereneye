@@ -15,6 +15,7 @@ from data.collector import (
     format_ratios,
     format_peer_comparison,
     format_news,
+    format_premium_news,
     format_macro,
 )
 from tools.technical_tools import compute_technical_indicators, format_technical_summary
@@ -118,8 +119,27 @@ def _create_agents() -> dict:
         llm=OPENAI_MODEL_NAME,
     )
 
+    recent_news_analyst = Agent(
+        role="Senior News Correspondent",
+        goal=(
+            "Read recent premium news articles from the last 7 days and identify "
+            "the core signals while filtering out all the noise and clickbait. "
+            "Explain exactly what happened and predict its immediate effect on the stock."
+        ),
+        backstory=(
+            "You are a highly respected, no-nonsense financial journalist. "
+            "You hate fluff, clickbait, and aggregated noise. When you read news, "
+            "you instantly extract the actual impact on revenue, margins, or market share. "
+            "You distill 10 articles down into the 2 or 3 events that actually matter."
+        ),
+        verbose=False,
+        allow_delegation=False,
+        llm=OPENAI_MODEL_NAME,
+    )
+
     report_writer = Agent(
         role="Senior Research Editor",
+
         goal=(
             "Compile all analysis sections into a cohesive, professional "
             "equity research report with an executive summary and clear "
@@ -143,6 +163,7 @@ def _create_agents() -> dict:
         "sentiment": sentiment_analyst,
         "technical": technical_analyst,
         "industry": industry_analyst,
+        "recent_news": recent_news_analyst,
         "report_writer": report_writer,
     }
 
@@ -351,8 +372,38 @@ IMPORTANT:
     ]
 
 
+def _create_news_tasks(agents: dict, data: CompanyData) -> list:
+    """Create the isolated task for the News Analyst."""
+
+    recent_news_task = Task(
+        description=f"""
+Analyze the recent premium news coverage for {data.name} ({data.ticker}).
+
+RECENT PREMIUM NEWS (Last 7 Days):
+{format_premium_news(data)}
+
+Provide a highly concise and actionable news briefing:
+1. Signal vs Noise: Filter out routine press releases and focus ONLY on material catalysts (e.g., earnings, M&A, executive departures, major product launches, downgrades/upgrades).
+2. Primary Events: Summarize the 2 to 3 most important events that occurred in the last week.
+3. Projected Impact: Explain clearly and directly how these events are affecting or will affect the stock price in the near term.
+
+Format your response exactly as follows:
+### Recent Catalysts
+- [Bullet points of events]
+
+### Stock Impact
+[1-2 paragraph explanation of the effect on the stock]
+
+Do NOT include generic company profiling or financial ratios. Focus solely on the news provided. If there is absolutely no premium news available, explicitly state: "No material news detected in the last 7 days."
+""",
+        agent=agents["recent_news"],
+        expected_output="A concise brief summarizing material news catalysts from the past 7 days and their immediate impact on the stock.",
+    )
+
+    return [recent_news_task]
+
 # ---------------------------------------------------------------------------
-# Crew Runner
+# Crew Runners
 # ---------------------------------------------------------------------------
 
 def run_research_crew(data: CompanyData, progress_callback=None) -> str:
@@ -399,6 +450,38 @@ def run_research_crew(data: CompanyData, progress_callback=None) -> str:
     )
 
     print("🚀 Running analysis agents...\n")
+    result = crew.kickoff()
+
+    return str(result)
+
+def run_news_analysis_crew(data: CompanyData, progress_callback=None) -> str:
+    """
+    Run an isolated equity research crew just for recent news analysis.
+    This runs asynchronously and independently of the main executive dossier.
+
+    Returns the final news report as a string.
+    """
+    print("\n📰 Initializing news analysis crew...\n")
+
+    agents = _create_agents()
+    tasks = _create_news_tasks(agents, data)
+
+    if progress_callback:
+        progress_callback("Analyzing Premium News")
+
+    def task_completed_cb(output):
+        if progress_callback:
+            progress_callback("Formatting Output")
+
+    crew = Crew(
+        agents=[agents["recent_news"]],
+        tasks=tasks,
+        process=Process.sequential,
+        verbose=True,
+        task_callback=task_completed_cb,
+    )
+
+    print("🚀 Running news analyst...\n")
     result = crew.kickoff()
 
     return str(result)
