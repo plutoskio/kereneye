@@ -1,68 +1,254 @@
-# 🔍 KerenEye — Equity Research Multi-Agent System
+# 🔍 KerenEye — Agentic Equity Research Intelligence Platform
 
-An AI-powered equity research system that generates comprehensive research reports for any publicly traded company. Enter a stock ticker and receive a Wall Street-grade analysis in minutes.
+An AI-powered equity research platform that generates Wall Street-grade analysis for any publicly traded company. Built on a multi-agent CrewAI architecture with a premium React dashboard, persistent caching, and real-time market intelligence.
+
+Enter a stock ticker and receive a comprehensive research report, recent news impact analysis, and a daily global market briefing — all synthesized by specialized AI agents working in parallel.
+
+---
+
+## Table of Contents
+
+- [Architecture](#architecture)
+- [Features](#features)
+- [Data Sources & Why We Chose Them](#data-sources--why-we-chose-them)
+- [Tech Stack & Rationale](#tech-stack--rationale)
+- [The AI Agents](#the-ai-agents)
+- [How It Works](#how-it-works)
+- [Caching & Refresh Logic](#caching--refresh-logic)
+- [Setup](#setup)
+- [Project Structure](#project-structure)
+- [Output](#output)
+
+---
 
 ## Architecture
 
-KerenEye uses a **Hub-and-Spoke multi-agent architecture** powered by [CrewAI](https://crewai.com):
+KerenEye uses a **Hub-and-Spoke multi-agent architecture** where data collection is deterministic Python and only analysis is delegated to LLM agents:
 
 ```
-User enters ticker (e.g., "AAPL")
-         │
-         ▼
-┌─────────────────────────────────────┐
-│   ORCHESTRATOR (pure Python)        │
-│                                     │
-│   1. yfinance  → financials, prices │
-│   2. Finnhub   → peer discovery     │
-│   3. FRED      → macro indicators   │
-└─────┬───┬───┬───┬───┬──────────────┘
-      │   │   │   │   │
-      ▼   ▼   ▼   ▼   ▼
-    [FA] [VA] [SA] [TA] [IA]   ← 5 LLM Analysis Agents
-      │   │   │   │   │
-      └───┴───┴───┴───┘
-              │
-              ▼
-       [Report Writer]  ← Compiles final report
-              │
-              ▼
-        📄 Research Report
+                         ┌─────────────────────────┐
+                         │     LANDING PAGE         │
+                         │  Indices · Headlines     │
+                         │  Daily Market Brief      │
+                         └────────────┬─────────────┘
+                                      │
+                         User searches ticker
+                                      │
+                                      ▼
+                    ┌──────────────────────────────────┐
+                    │   CORE DATA COLLECTOR (instant)   │
+                    │   yfinance → prices, ratios,      │
+                    │   financials, analyst targets      │
+                    └────────────┬─────────────────────┘
+                                 │
+           ┌─────────────────────┼──────────────────────┐
+           ▼                     ▼                      ▼
+   ┌──────────────┐    ┌─────────────────┐    ┌──────────────────┐
+   │ FULL DATA     │    │ PREMIUM NEWS    │    │ MACRO DATA       │
+   │ Finnhub peers │    │ Benzinga        │    │ FRED indicators  │
+   │ Peer ratios   │    │ Polygon         │    │ GDP, CPI, Rates  │
+   └───────┬───────┘    └────────┬────────┘    └────────┬─────────┘
+           │                     │                      │
+           ▼                     ▼                      ▼
+   ┌──────────────────────────────────────────────────────────────┐
+   │                    CREWAI AGENT TEAMS                        │
+   │                                                              │
+   │  TEAM 1: Executive Dossier (5 agents in parallel + writer)  │
+   │  [FA] [VA] [SA] [TA] [IA] → [Report Writer] → 📄 Report    │
+   │                                                              │
+   │  TEAM 2: News Analyst (1 agent)                              │
+   │  [Recent News Analyst] → 📰 News Impact Analysis            │
+   │                                                              │
+   │  TEAM 3: Chief Market Strategist (1 agent, no ticker)       │
+   │  [Market Strategist] → 🌍 Daily Market & World Brief        │
+   └──────────────────────────────────────────────────────────────┘
 ```
 
 ### Key Design Decisions
 
-- **Deterministic Orchestrator**: Data collection is pure Python — no LLM non-determinism in the control flow
-- **LLM Agents for Analysis Only**: Agents are used only where reasoning/interpretation is needed
-- **Single Data Pass**: All data fetched once, distributed to agents — no redundant API calls
-- **Free Data Pipeline**: yfinance + Finnhub + FRED — all 100% free
+- **Deterministic Orchestrator:** Data collection is pure Python — no LLM non-determinism in the control flow. The LLM never browses the internet; we feed it strictly factual, pre-collected data.
+- **LLM Agents for Analysis Only:** Agents are used only where reasoning, interpretation, and synthesis are needed — not for data retrieval.
+- **Two-Phase Data Loading:** Core data (prices, ratios) loads instantly for immediate UI rendering. Heavy data (peers, macro, premium news) loads only when agents are triggered by the user.
+- **Manual Generation:** Reports and analyses are only generated when the user clicks "Generate" — never automatically — to avoid unnecessary API calls and costs.
+- **Persistent Caching:** All generated reports are cached to the filesystem as JSON. Cached data is served instantly on subsequent visits without re-running agents.
 
-### The Agents
+---
 
-| Agent | Role | Input | Output |
-|-------|------|-------|--------|
-| **Financial Analyst** | Fundamental analysis | Financial statements, ratios | Revenue trends, margins, balance sheet health |
-| **Valuation Specialist** | Fair value assessment | Ratios, peer multiples, targets | Over/undervalued assessment, peer comparison |
-| **Sentiment Analyst** | Market intelligence | News, analyst ratings | Sentiment score, catalysts, risks |
-| **Technical Analyst** | Price action analysis | OHLCV data, indicators | Trend, momentum, support/resistance, chart |
-| **Industry Analyst** | Competitive analysis | Company profile, peers, macro | Moat analysis, SWOT, industry dynamics |
-| **Report Writer** | Final compilation | All agent outputs | Professional equity research report |
+## Features
 
-## Data Sources
+### 1. Executive Dossier (Per-Ticker)
+A comprehensive equity research report generated by 6 AI agents working in parallel:
+- Executive Summary with Buy/Hold/Sell recommendation
+- Financial Analysis (revenue trends, margins, balance sheet health)
+- Valuation Analysis (multiples, peer comparison, fair value)
+- Technical Analysis (RSI, MACD, Bollinger Bands, support/resistance)
+- Market Sentiment (news, analyst consensus, catalysts/risks)
+- Industry & Competitive Analysis (moat, SWOT, macro context)
+- **Caches for 30 days.** Shows a "Generate" button if no report exists, "Refresh" if one does.
 
-| Source | Cost | What It Provides |
-|--------|------|------------------|
-| **yfinance** | Free (no key needed) | Financial statements, prices, ratios, news, analyst targets |
-| **Finnhub** | Free (API key) | Peer/competitor ticker discovery |
-| **FRED** | Free (API key) | Macroeconomic indicators (GDP, rates, inflation) |
+### 2. Recent News Analysis (Per-Ticker)
+An AI-filtered analysis of the latest stock-specific news from Benzinga and Polygon:
+- Filters out noise and irrelevant headlines
+- Explains each news item's impact on the stock clearly
+- Positioned below the stock chart for quick scanning
+- **Caches for 7 days.** Manual generation only.
+
+### 3. Daily Market & World Brief (Homepage)
+A concise, structured daily briefing generated by the "Chief Market Strategist" agent:
+- **Markets:** Index performance with specific % moves and drivers
+- **Macro:** Notable economic data (Fed Funds Rate, CPI, GDP, Unemployment)
+- **World:** Geopolitical events that could affect markets
+- **Outlook:** What to watch today/this week
+- **Caches for 24 hours.** Displayed on the landing page with Generate/Refresh buttons.
+
+### 4. Real-Time Dashboard
+- **5-Year Equity Performance Chart** (Recharts)
+- **Fundamental Metrics Grid** (PE, ROE, debt ratios, margins, etc.)
+- **Global Indices Ribbon** (S&P 500, Nasdaq, FTSE 100, DAX, CAC 40, Nikkei 225)
+- **3D Particle Network Background** (Three.js)
+- **Step-by-step loading animation** showing real-time agent progress
+
+---
+
+## Data Sources & Why We Chose Them
+
+### Core Data (Free, No Rate Limits)
+
+| Source | What It Provides | Why This One |
+|--------|-----------------|--------------|
+| **[yfinance](https://github.com/ranaroussi/yfinance)** | Financials, prices, ratios, analyst targets, basic news | Free, no API key, reliable, comprehensive. The backbone of every stock lookup. |
+| **[Finnhub](https://finnhub.io)** | Peer/competitor discovery, professional market headlines | Free tier is generous. Its peer discovery endpoint is unique — no other free API provides it. Headlines are institutional-quality. |
+| **[FRED](https://fred.stlouisfed.org)** | GDP, Fed Funds Rate, CPI, Unemployment, 10Y-2Y Spread | The gold standard for macroeconomic data. Free, official US government source. |
+
+### Premium News (Stock-Specific)
+
+| Source | What It Provides | Why This One |
+|--------|-----------------|--------------|
+| **[Benzinga](https://www.benzinga.com/apis)** | Stock-specific news articles with summaries | Clean financial news API with minimal noise. Unlike Yahoo Finance, articles are professionally written and ad-free. |
+| **[Polygon](https://polygon.io)** | Stock-specific news and ticker events | Reliable financial data provider. Used as a secondary source to Benzinga for broader coverage. Rate limited to 5 calls/min on free tier. |
+
+### World/Geopolitical (Homepage Brief)
+
+| Source | What It Provides | Why This One |
+|--------|-----------------|--------------|
+| **[GDELT](https://www.gdeltproject.org)** | Global geopolitical headlines, world events | **Completely free, no API key needed.** Covers 65 languages and every country. Perfect for "what's happening in the world that could affect markets." |
+
+### Why NOT These Alternatives
+
+| Source | Why We Skipped It |
+|--------|------------------|
+| **Yahoo Finance (direct)** | Too much noise, ads, and rate limiting. yfinance wraps it cleanly. |
+| **NewsAPI** | Free tier limited to 100 req/day, articles only from last 24h, and **no production use allowed**. Paid tier is $449/month. |
+| **Alpha Vantage** | Rate limited to 5 calls/min on free tier. Data coverage doesn't exceed yfinance. |
+
+---
+
+## Tech Stack & Rationale
+
+### Backend (Python)
+
+| Technology | Why We Chose It |
+|-----------|----------------|
+| **[CrewAI](https://crewai.com)** | Multi-agent orchestration framework. Instead of one massive LLM prompt (which hallucinates and loses detail), CrewAI lets us define specialized agent personas that run in parallel with focused goals. This produces deeper, more accurate, and more nuanced analysis. |
+| **[FastAPI](https://fastapi.tiangolo.com)** | Lightweight Python web framework with native `async/await`. Crucial for running background CrewAI tasks and streaming status updates to the frontend without blocking. Auto-generates OpenAPI docs. |
+| **[OpenAI GPT](https://openai.com)** | The LLM backbone powering CrewAI agents. Default model: `gpt-4o-mini` (fast, cost-efficient). Configurable via `.env`. |
+| **[asyncer](https://github.com/tiangolo/asyncer)** | Bridges sync CrewAI execution with FastAPI's async routes. Runs blocking agent tasks in background threads. |
+
+### Frontend (React)
+
+| Technology | Why We Chose It |
+|-----------|----------------|
+| **[React](https://react.dev) + [Vite](https://vitejs.dev)** | React handles the complex state management needed for interactive dashboards (syncing 3D background, loading steppers, live status polling). Vite provides near-instant Hot Module Replacement for fast development. |
+| **[Tailwind CSS](https://tailwindcss.com)** | Utility-first CSS framework. Enables the premium, glassmorphic "Advisory Intelligence" aesthetic through standardized classes without messy external stylesheets. |
+| **[Recharts](https://recharts.org)** | Beautiful, responsive SVG charts that integrate cleanly with React state. Renders the 5-year equity performance chart. |
+| **[@react-three/fiber](https://docs.pmnd.rs/react-three-fiber)** | React renderer for Three.js. Powers the 3D particle network background on the landing page — the premium visual that signals institutional-grade software. |
+| **[react-markdown](https://github.com/remarkjs/react-markdown)** | Renders the AI-generated markdown reports and analyses directly in the UI. |
+
+---
+
+## The AI Agents
+
+### Executive Dossier Team (6 Agents)
+
+| Agent | Persona | What It Does |
+|-------|---------|-------------|
+| **Financial Analyst** | Seasoned equity research analyst (15yr experience) | Analyzes financial statements, margins, revenue trends, balance sheet health |
+| **Valuation Specialist** | Contrarian valuation expert | Determines fair value, identifies over/undervaluation, compares peer multiples |
+| **Sentiment Analyst** | Market intelligence expert | Scores news sentiment, identifies catalysts and risks |
+| **Technical Analyst** | Quantitative chart technician | Computes RSI, MACD, Bollinger Bands, identifies support/resistance |
+| **Industry Analyst** | Competitive strategy expert | Analyzes economic moat, SWOT, industry dynamics, macro positioning |
+| **Report Writer** | Senior equity research editor | Compiles all 5 analyses into a cohesive, professional markdown report |
+
+### News Analysis (1 Agent)
+| Agent | Persona | What It Does |
+|-------|---------|-------------|
+| **Recent News Analyst** | Financial journalist | Filters and explains recent stock-specific news from Benzinga/Polygon |
+
+### Daily Market Brief (1 Agent)
+| Agent | Persona | What It Does |
+|-------|---------|-------------|
+| **Chief Market Strategist** | Morning briefing writer at a top investment bank | Synthesizes Finnhub headlines, FRED macro data, GDELT world news, and index performance into a ~150-word structured daily brief |
+
+---
+
+## How It Works
+
+### Flow 1: Stock Analysis
+
+1. **User searches a ticker** (e.g., "AAPL") in the search bar.
+2. **Instant core data fetch:** `GET /api/company/AAPL` hits yfinance for prices, ratios, and financials. The chart and metrics render immediately.
+3. **Cache check:** `GET /api/research/AAPL` and `GET /api/news_analysis/AAPL` check for valid cached reports.
+4. **If cached:** The report/analysis is displayed instantly with a "Refresh" button.
+5. **If not cached:** A "Generate" button is shown. Clicking it triggers `POST /api/research/AAPL` or `POST /api/news_analysis/AAPL`.
+6. **Agent execution:** The backend collects full data, then runs the CrewAI agents. The frontend polls `/api/research/status/AAPL` every second, animating a step-by-step loading stepper in real time.
+7. **Report rendered:** The final markdown is displayed via `react-markdown` and cached to `cache/reports/AAPL.json` or `cache/news/AAPL.json`.
+
+### Flow 2: Daily Market Brief
+
+1. **User visits the homepage** — the landing page loads with the 3D background and indices ribbon.
+2. **Cache check:** `GET /api/market/brief` checks for a recent brief (< 24 hours old).
+3. **If cached:** The brief is displayed with a "Refresh" button and an age indicator.
+4. **If not cached:** A "Generate Daily Brief" button is shown. Clicking it triggers `POST /api/market/brief`.
+5. **Data collection:** The backend fetches Finnhub headlines (20), FRED macro snapshot, GDELT world headlines (15), and yfinance index data.
+6. **Agent synthesis:** The Chief Market Strategist agent produces a structured 4-section brief: Markets, Macro, World, Outlook.
+7. **Brief rendered:** Displayed on the landing page and cached to `cache/briefs/daily.json`.
+
+---
+
+## Caching & Refresh Logic
+
+All AI-generated content is cached to the filesystem for persistence across server restarts.
+
+| Content | Cache Location | Expiration | Behavior |
+|---------|---------------|-----------|----------|
+| **Executive Dossier** | `cache/reports/{TICKER}.json` | 30 days | Show cached report with "Refresh" button. If expired/missing, show "Generate" button. Expired reports are **never** displayed. |
+| **News Analysis** | `cache/news/{TICKER}.json` | 7 days | Same pattern — "Refresh" if valid, "Generate" if expired/missing. |
+| **Daily Market Brief** | `cache/briefs/daily.json` | 24 hours | Same pattern — one single global file, not per-ticker. |
+
+**Key rules:**
+- Reports are **never auto-generated** — always require user action.
+- Expired reports are **never shown** — the user sees a clean "Generate" prompt instead.
+- All generation has a visible loading state with real-time status polling.
+
+---
 
 ## Setup
 
 ### 1. Clone & Install
 
 ```bash
+git clone https://github.com/plutoskio/kereneye.git
 cd kereneye
+
+# Backend
+python3 -m venv venv
+source venv/bin/activate
 pip install -r requirements.txt
+
+# Frontend
+cd frontend
+npm install
+cd ..
 ```
 
 ### 2. Configure API Keys
@@ -72,13 +258,38 @@ cp .env.example .env
 ```
 
 Edit `.env` and add your keys:
-- **OpenAI API key** (required) — for the LLM agents
-- **Finnhub API key** (optional) — get free at [finnhub.io](https://finnhub.io/register)
-- **FRED API key** (optional) — get free at [fred.stlouisfed.org](https://fred.stlouisfed.org/docs/api/api_key.html)
 
-> The system works without Finnhub/FRED keys — it will skip peer comparison and macro data.
+| Key | Required | Where to Get It |
+|-----|----------|----------------|
+| `OPENAI_API_KEY` | **Yes** | [platform.openai.com](https://platform.openai.com) |
+| `FINNHUB_API_KEY` | Recommended | [finnhub.io](https://finnhub.io/register) (free) |
+| `FRED_API_KEY` | Recommended | [fred.stlouisfed.org](https://fred.stlouisfed.org/docs/api/api_key.html) (free) |
+| `BENZINGA_API_KEY` | Optional | [benzinga.com/apis](https://www.benzinga.com/apis) |
+| `MASSIVE_API_KEY` | Optional | [polygon.io](https://polygon.io) (free tier: 5 calls/min) |
+| `OPENAI_MODEL_NAME` | Optional | Default: `gpt-4o-mini`. Override to use `gpt-4o` etc. |
+
+> The system works without Finnhub/FRED/Benzinga/Polygon keys — it will gracefully skip those data sources and note it in the logs.
 
 ### 3. Run
+
+**Terminal 1 — Backend:**
+```bash
+cd kereneye
+source venv/bin/activate
+uvicorn api:app --reload --port 8000
+```
+
+**Terminal 2 — Frontend:**
+```bash
+cd kereneye/frontend
+npm run dev
+```
+
+Open **http://localhost:5173** in your browser.
+
+### CLI Mode (Optional)
+
+You can also generate reports from the command line:
 
 ```bash
 python main.py AAPL
@@ -86,81 +297,72 @@ python main.py AAPL
 
 The report will be saved to `output/reports/` as a Markdown file.
 
-## Output
-
-Each report includes:
-
-1. **Executive Summary** — Investment thesis + Buy/Hold/Sell recommendation
-2. **Company Overview** — Business description, key facts
-3. **Financial Analysis** — Revenue trends, margins, balance sheet, cash flow
-4. **Valuation Analysis** — Multiples, peer comparison, fair value
-5. **Technical Analysis** — Price trends, indicators, support/resistance, chart
-6. **Market Sentiment** — News, analyst consensus, catalysts/risks
-7. **Industry & Competitive Analysis** — Moat, SWOT, industry dynamics
-8. **Risk Factors** — Consolidated risks
-9. **Investment Recommendation** — Final rating with confidence level
+---
 
 ## Project Structure
 
 ```
 kereneye/
-├── main.py                    # CLI entry point
-├── config.py                  # API keys & settings
-├── requirements.txt           # Dependencies
-├── .env.example               # API key template
+├── api.py                         # FastAPI backend (all REST endpoints)
+├── config.py                      # API keys & settings (loaded from .env)
+├── main.py                        # CLI entry point
+├── requirements.txt               # Python dependencies
+├── .env.example                   # API key template
 │
 ├── data/
-│   └── collector.py           # Data orchestrator (yfinance, Finnhub, FRED)
-│
-├── agents/                    # Agent module (defined in crew/)
-│
-├── tools/
-│   ├── technical_tools.py     # RSI, MACD, MA, Bollinger, volatility
-│   └── chart_tools.py         # Price chart generation
+│   └── collector.py               # Data engine (yfinance, Finnhub, FRED, Benzinga, Polygon, GDELT)
+│                                  #   → CompanyData, MarketBriefData dataclasses
+│                                  #   → collect_core_data(), collect_full_data(), collect_market_brief_data()
+│                                  #   → Format helpers for agent context injection
 │
 ├── crew/
-│   └── research_crew.py       # CrewAI agents, tasks, and crew runner
+│   └── research_crew.py           # CrewAI agents, tasks, and crew runners
+│                                  #   → run_research_crew() (6-agent Executive Dossier)
+│                                  #   → run_news_analysis_crew() (1-agent News Analyst)
+│                                  #   → run_market_brief_crew() (1-agent Market Strategist)
+│
+├── tools/
+│   ├── technical_tools.py         # RSI, MACD, MA, Bollinger, volatility computation
+│   └── chart_tools.py             # Price chart generation
+│
+├── cache/                         # Persistent JSON cache (auto-created)
+│   ├── reports/                   #   → {TICKER}.json (30-day expiration)
+│   ├── news/                      #   → {TICKER}.json (7-day expiration)
+│   └── briefs/                    #   → daily.json (24-hour expiration)
+│
+├── frontend/                      # React + Vite + Tailwind
+│   ├── src/
+│   │   ├── App.jsx                # Main dashboard component
+│   │   ├── Background3D.jsx       # Three.js particle network
+│   │   └── index.css              # Tailwind config + custom styles
+│   └── package.json
 │
 └── output/
-    └── reports/               # Generated reports
+    └── reports/                   # CLI-generated markdown reports
 ```
 
-## Tech Stack & Tooling Rationale
+---
 
-The KerenEye system is separated into a Python backend (for heavy AI processing) and a modern React frontend (for presentation).
+## Output
 
-### Backend (Python & AI)
+### Executive Dossier includes:
+1. **Executive Summary** — Investment thesis + Buy/Hold/Sell recommendation
+2. **Company Overview** — Business description, key facts
+3. **Financial Analysis** — Revenue trends, margins, balance sheet, cash flow
+4. **Valuation Analysis** — Multiples, peer comparison, fair value
+5. **Technical Analysis** — Price trends, indicators, support/resistance
+6. **Market Sentiment** — News, analyst consensus, catalysts/risks
+7. **Industry & Competitive Analysis** — Moat, SWOT, industry dynamics
+8. **Risk Factors** — Consolidated risks
+9. **Investment Recommendation** — Final rating with confidence level
 
-- **[CrewAI](https://crewai.com)**: Used as the core Multi-Agent orchestration framework. 
-  - *Why CrewAI?* Instead of relying on a single massive LLM prompt (which often hallucinates or loses detail), CrewAI allows us to break down complex financial analysis into distinct personas (e.g., Financial Analyst, Technical Analyst). By running these specialized agents in parallel with specific tools and focused goals, we get a much deeper, more accurate, and nuanced final report.
-- **[FastAPI](https://fastapi.tiangolo.com/)**: Serves as the Python backend framework connecting the CLI core to the web app.
-  - *Why FastAPI?* It is lightweight, incredibly fast, and natively supports asynchronous execution (`async`/`await`), which is crucial for running background CrewAI tasks and streaming status updates to the frontend without blocking the main server.
-- **[yfinance](https://github.com/ranaroussi/yfinance)**: Financial data from Yahoo Finance.
-  - *Why yfinance?* It is free, requires no API key, and provides reliable, comprehensive historical price data, financial statements, and basic corporate metadata.
-- **[Finnhub](https://finnhub.io)**: Peer discovery and professional market news.
-- **[FRED API](https://fred.stlouisfed.org)**: Macroeconomic data (interest rates, GDP).
-- **[OpenAI GPT](https://openai.com)**: The underlying LLM backbone powering the CrewAI agents.
+### News Analysis includes:
+- Filtered, recent (< 7 day) news from Benzinga and Polygon
+- Per-article impact explanation on the stock
+- Clear, noise-free presentation
 
-### Frontend (React & Vite)
-
-- **[React](https://react.dev/) + [Vite](https://vitejs.dev/)**: The core UI framework.
-  - *Why React/Vite?* React handles the complex state management required for building interactive dashboards (like syncing the 3D background with the loading status). Vite provides near-instant Hot Module Replacement (HMR) for incredibly fast development.
-- **[Tailwind CSS](https://tailwindcss.com/)**: For styling.
-  - *Why Tailwind?* It allows for rapid, utility-first styling to create the premium, glassmorphic "Advisory Intelligence" aesthetic strictly through standardized classes, avoiding messy external CSS files.
-- **[Recharts](https://recharts.org/)**: For charting equity performance.
-  - *Why Recharts?* It renders beautiful, responsive SVG charts that integrate cleanly with React state and can easily inherit Tailwind theme colors.
-- **[@react-three/fiber](https://docs.pmnd.rs/react-three-fiber)**: For the 3D particle network background.
-  - *Why Three.js?* It provides the premium, dynamic, and interactive "data network" visual that signals high-end institutional software.
-
-## Operational Process: How the App Works
-
-The operational flow of the KerenEye application is strictly built to ensure accuracy, speed, and real-time user feedback.
-
-1. **User Request**: The user enters a stock ticker (e.g., "AAPL") into the React frontend search bar and hits enter.
-2. **Instant Pre-fetch (Synchronous)**: The frontend immediately hits the backend `GET /api/company/{ticker}` endpoint. The backend synchronously uses `yfinance` to grab the company's current price, market cap, basic ratios, and historical price data. This data is returned instantly to paint the primary React dashboard and the Recharts historical chart so the user isn't left staring at a blank screen.
-3. **Agent Orchestration (Asynchronous)**: Simultaneously, the frontend hits `GET /api/research/{ticker}`. This triggers the heavy lifting. The backend initializes a `Crew` of 6 distinct AI personas (Agents).
-4. **Data Injection**: The raw data collected earlier is cleanly formatted into string contexts and injected into the specific Tasks assigned to each Agent. *Crucially, we do not let the LLM browse the live internet for data, preventing hallucination. We feed it strictly defined, factual data gathered by Python.*
-5. **Concurrent Execution**: The first 5 agents (Financial Analyst, Valuation Specialist, Sentiment Analyst, Technical Analyst, Industry Analyst) execute their assigned tasks **simultaneously in parallel**. This vastly speeds up report generation time.
-6. **Real-Time Progress Tracking (Polling)**: While the agents run, the React frontend polls `GET /api/research/status/{ticker}` every second. As tasks finish on the backend, a global status dictionary is updated, which the frontend reads to animate the beautiful, step-by-step loading stepper dynamically.
-7. **Synthesis & Finalization**: Once the 5 parallel analysts finish, the 6th agent (the Report Writer) activates. It ingests all 5 outputs and synthesizes them into a cohesive, properly formatted Markdown equity research report.
-8. **Rendering**: The backend returns the final Markdown string to the frontend, which is rendered using `react-markdown` in the Executive Dossier panel.
+### Daily Market Brief includes:
+- Index performance (S&P 500, Nasdaq, FTSE, DAX, CAC, Nikkei)
+- Macro snapshot (Fed Funds, CPI, Unemployment, GDP, Yield Spread)
+- Geopolitical/world events affecting markets
+- Actionable outlook for the day/week
