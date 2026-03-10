@@ -1,8 +1,8 @@
-# 🔍 KerenEye — Agentic Equity Research Intelligence Platform
+# 🔍 KerenEye — Agentic Equity Research & Portfolio Intelligence Platform
 
-An AI-powered equity research platform that generates Wall Street-grade analysis for any publicly traded company. Built on a multi-agent CrewAI architecture with a premium React dashboard, persistent caching, and real-time market intelligence.
+An AI-powered equity research platform **and portfolio tracker** that generates Wall Street-grade analysis for any publicly traded company. Built on a multi-agent CrewAI architecture with a premium React dashboard, real-time portfolio valuation, performance analytics, and market intelligence.
 
-Enter a stock ticker and receive a comprehensive research report, recent news impact analysis, and a daily global market briefing — all synthesized by specialized AI agents working in parallel.
+Add holdings to your portfolio, track live P&L, compare performance against the S&P 500, monitor market open/close status — all while leveraging specialized AI agents to generate deep research reports, news analysis, and daily market briefings.
 
 ---
 
@@ -10,6 +10,7 @@ Enter a stock ticker and receive a comprehensive research report, recent news im
 
 - [Architecture](#architecture)
 - [Features](#features)
+- [Portfolio Tracker (New)](#portfolio-tracker-new)
 - [Data Sources & Why We Chose Them](#data-sources--why-we-chose-them)
 - [Tech Stack & Rationale](#tech-stack--rationale)
 - [The AI Agents](#the-ai-agents)
@@ -23,45 +24,41 @@ Enter a stock ticker and receive a comprehensive research report, recent news im
 
 ## Architecture
 
-KerenEye uses a **Hub-and-Spoke multi-agent architecture** where data collection is deterministic Python and only analysis is delegated to LLM agents:
+KerenEye uses a **Hub-and-Spoke multi-agent architecture** where data collection is deterministic Python and only analysis is delegated to LLM agents. The portfolio layer runs independently of the AI agents — it uses yfinance for real-time price enrichment and pure Python for analytics calculations.
 
 ```
-                         ┌─────────────────────────┐
-                         │     LANDING PAGE         │
-                         │  Indices · Headlines     │
-                         │  Daily Market Brief      │
-                         └────────────┬─────────────┘
-                                      │
-                         User searches ticker
-                                      │
-                                      ▼
-                    ┌──────────────────────────────────┐
-                    │   CORE DATA COLLECTOR (instant)   │
-                    │   yfinance → prices, ratios,      │
-                    │   financials, analyst targets      │
-                    └────────────┬─────────────────────┘
+                    ┌─────────────────────────────────────┐
+                    │     PORTFOLIO DASHBOARD (HOME)       │
+                    │  Market Status · Holdings Table      │
+                    │  P&L · Allocation · Daily Brief      │
+                    │  Performance · Benchmark · News      │
+                    └────────────┬────────────────────────┘
                                  │
-           ┌─────────────────────┼──────────────────────┐
-           ▼                     ▼                      ▼
-   ┌──────────────┐    ┌─────────────────┐    ┌──────────────────┐
-   │ FULL DATA     │    │ PREMIUM NEWS    │    │ MACRO DATA       │
-   │ Finnhub peers │    │ Benzinga        │    │ FRED indicators  │
-   │ Peer ratios   │    │ Polygon         │    │ GDP, CPI, Rates  │
-   └───────┬───────┘    └────────┬────────┘    └────────┬─────────┘
-           │                     │                      │
-           ▼                     ▼                      ▼
-   ┌──────────────────────────────────────────────────────────────┐
-   │                    CREWAI AGENT TEAMS                        │
-   │                                                              │
-   │  TEAM 1: Executive Dossier (5 agents in parallel + writer)  │
-   │  [FA] [VA] [SA] [TA] [IA] → [Report Writer] → 📄 Report    │
-   │                                                              │
-   │  TEAM 2: News Analyst (1 agent)                              │
-   │  [Recent News Analyst] → 📰 News Impact Analysis            │
-   │                                                              │
-   │  TEAM 3: Chief Market Strategist (1 agent, no ticker)       │
-   │  [Market Strategist] → 🌍 Daily Market & World Brief        │
-   └──────────────────────────────────────────────────────────────┘
+              ┌──────────────────┼──────────────────────┐
+              │                  │                      │
+      Click holding      "Add Holding"          Auto-refresh
+              │                  │                  (30s / 5min)
+              ▼                  ▼                      ▼
+┌──────────────────┐  ┌──────────────────┐  ┌──────────────────────┐
+│ STOCK DETAIL     │  │ PORTFOLIO CRUD   │  │ LIVE PRICE ENGINE    │
+│ Chart · Metrics  │  │ JSON persistence │  │ yfinance batch fetch │
+│ AI Reports       │  │ Transaction log  │  │ P&L · Allocation     │
+│ News Analysis    │  │ Weighted avg     │  │ Sharpe · Beta        │
+└───────┬──────────┘  └──────────────────┘  └──────────────────────┘
+        │
+        ▼ (User clicks "Generate")
+┌──────────────────────────────────────────────────────────────┐
+│                    CREWAI AGENT TEAMS                        │
+│                                                              │
+│  TEAM 1: Executive Dossier (5 agents in parallel + writer)  │
+│  [FA] [VA] [SA] [TA] [IA] → [Report Writer] → 📄 Report    │
+│                                                              │
+│  TEAM 2: News Analyst (1 agent)                              │
+│  [Recent News Analyst] → 📰 News Impact Analysis            │
+│                                                              │
+│  TEAM 3: Chief Market Strategist (1 agent, no ticker)       │
+│  [Market Strategist] → 🌍 Daily Market & World Brief        │
+└──────────────────────────────────────────────────────────────┘
 ```
 
 ### Key Design Decisions
@@ -71,6 +68,7 @@ KerenEye uses a **Hub-and-Spoke multi-agent architecture** where data collection
 - **Two-Phase Data Loading:** Core data (prices, ratios) loads instantly for immediate UI rendering. Heavy data (peers, macro, premium news) loads only when agents are triggered by the user.
 - **Manual Generation:** Reports and analyses are only generated when the user clicks "Generate" — never automatically — to avoid unnecessary API calls and costs.
 - **Persistent Caching:** All generated reports are cached to the filesystem as JSON. Cached data is served instantly on subsequent visits without re-running agents.
+- **Local-First Portfolio:** Portfolio data (holdings, transactions) is stored as JSON files — no external database required. This mirrors the existing caching pattern and keeps the system self-contained.
 
 ---
 
@@ -110,13 +108,69 @@ A concise, structured daily briefing generated by the "Chief Market Strategist" 
 
 ---
 
+## Portfolio Tracker (New)
+
+The portfolio tracker transforms KerenEye from a single-stock research tool into a full portfolio management dashboard.
+
+### Portfolio Management
+- **Add/remove holdings** — enter ticker, share count, and average purchase price
+- **Ticker validation** — verifies tickers exist via yfinance before adding
+- **Weighted average cost** — adding more shares to an existing position recalculates automatically
+- **Transaction logging** — every buy/sell is recorded with timestamps
+
+### Real-Time Valuation
+- **Live P&L** — per-holding and total portfolio profit/loss (absolute $ and %)
+- **Auto-refresh** — prices update every **30 seconds** during market hours, every **5 minutes** when markets are closed
+- **"Updated Xs ago" indicator** — shows how stale the data is at any moment
+- **Batch price fetching** — all tickers fetched in one `yfinance.Tickers()` call for efficiency
+
+### Performance Analytics
+All metrics are computed server-side using NumPy and Pandas:
+
+| Metric | What It Measures |
+|--------|-----------------|
+| **Total Return** | Portfolio gain/loss since inception |
+| **Annualized Return** | Time-weighted compound annual return |
+| **Sharpe Ratio** | Risk-adjusted return (vs 4.5% risk-free rate) |
+| **Beta** | Systematic risk vs S&P 500 (covariance / variance) |
+| **Volatility** | Annualized standard deviation of daily returns |
+| **Best/Worst Performer** | Highest and lowest P&L% holding |
+
+### Benchmark Comparison
+- **Portfolio vs S&P 500 chart** — normalized to the same starting value for visual comparison
+- **Period selector** — 1mo, 3mo, 6mo, 1y, 2y, 5y
+- **Uses `^GSPC` directly** from yfinance as benchmark
+
+### Asset Allocation
+- **Sector allocation pie chart** — powered by Recharts
+- **Per-holding weight %** — shown in the holdings table
+- **Sector data** — fetched from yfinance company info (not hardcoded)
+
+### Market Status
+- **NYSE and Euronext** open/closed status badges
+- **Live countdown timer** — "Closes in 2h 14m" or "Opens in 11h 30m"
+- **Weekend handling** — correctly skips Saturday/Sunday
+- **Pure time-based calculation** — no API calls needed (uses `pytz` timezone math)
+
+### Holdings News Feed
+- **Aggregated news** for all portfolio holdings
+- **Fetched via yfinance** — up to 5 recent articles per holding
+- **Manual refresh** button
+
+### Transaction History
+- **Chronological log** of all buys and sells
+- **Color-coded badges** — green for buys, red for sells
+- **Separate page** at `/transactions`
+
+---
+
 ## Data Sources & Why We Chose Them
 
 ### Core Data (Free, No Rate Limits)
 
 | Source | What It Provides | Why This One |
 |--------|-----------------|--------------|
-| **[yfinance](https://github.com/ranaroussi/yfinance)** | Financials, prices, ratios, analyst targets, basic news | Free, no API key, reliable, comprehensive. The backbone of every stock lookup. |
+| **[yfinance](https://github.com/ranaroussi/yfinance)** | Financials, prices, ratios, analyst targets, basic news, sector/industry classification | Free, no API key, reliable, comprehensive. The backbone of every stock lookup and portfolio enrichment. |
 | **[Finnhub](https://finnhub.io)** | Peer/competitor discovery, professional market headlines | Free tier is generous. Its peer discovery endpoint is unique — no other free API provides it. Headlines are institutional-quality. |
 | **[FRED](https://fred.stlouisfed.org)** | GDP, Fed Funds Rate, CPI, Unemployment, 10Y-2Y Spread | The gold standard for macroeconomic data. Free, official US government source. |
 
@@ -124,8 +178,8 @@ A concise, structured daily briefing generated by the "Chief Market Strategist" 
 
 | Source | What It Provides | Why This One |
 |--------|-----------------|--------------|
-| **[Benzinga](https://www.benzinga.com/apis)** | Stock-specific news articles with summaries | Clean financial news API with minimal noise. Unlike Yahoo Finance, articles are professionally written and ad-free. |
-| **[Polygon](https://polygon.io)** | Stock-specific news and ticker events | Reliable financial data provider. Used as a secondary source to Benzinga for broader coverage. Rate limited to 5 calls/min on free tier. |
+| **[Benzinga](https://www.benzinga.com/apis)** | Stock-specific news articles with summaries | Clean financial news API with minimal noise. Articles are professionally written and ad-free. |
+| **[Polygon](https://polygon.io)** | Stock-specific news and ticker events | Reliable financial data provider. Used as a secondary source to Benzinga for broader coverage. |
 
 ### World/Geopolitical (Homepage Brief)
 
@@ -140,6 +194,7 @@ A concise, structured daily briefing generated by the "Chief Market Strategist" 
 | **Yahoo Finance (direct)** | Too much noise, ads, and rate limiting. yfinance wraps it cleanly. |
 | **NewsAPI** | Free tier limited to 100 req/day, articles only from last 24h, and **no production use allowed**. Paid tier is $449/month. |
 | **Alpha Vantage** | Rate limited to 5 calls/min on free tier. Data coverage doesn't exceed yfinance. |
+| **Supabase / PostgreSQL** | Considered for portfolio storage — a database would be needed if this were multi-user. For a demo/showcase with a single user, JSON file persistence is simpler, requires no external setup, and mirrors our existing caching pattern. |
 
 ---
 
@@ -147,22 +202,27 @@ A concise, structured daily briefing generated by the "Chief Market Strategist" 
 
 ### Backend (Python)
 
-| Technology | Why We Chose It |
-|-----------|----------------|
-| **[CrewAI](https://crewai.com)** | Multi-agent orchestration framework. Instead of one massive LLM prompt (which hallucinates and loses detail), CrewAI lets us define specialized agent personas that run in parallel with focused goals. This produces deeper, more accurate, and more nuanced analysis. |
-| **[FastAPI](https://fastapi.tiangolo.com)** | Lightweight Python web framework with native `async/await`. Crucial for running background CrewAI tasks and streaming status updates to the frontend without blocking. Auto-generates OpenAPI docs. |
-| **[OpenAI GPT](https://openai.com)** | The LLM backbone powering CrewAI agents. Default model: `gpt-4o-mini` (fast, cost-efficient). Configurable via `.env`. |
-| **[asyncer](https://github.com/tiangolo/asyncer)** | Bridges sync CrewAI execution with FastAPI's async routes. Runs blocking agent tasks in background threads. |
+| Technology | Why We Chose It | Why Not the Alternative |
+|-----------|----------------|------------------------|
+| **[CrewAI](https://crewai.com)** | Multi-agent orchestration framework. Instead of one massive LLM prompt (which hallucinates and loses detail), CrewAI lets us define specialized agent personas that run in parallel with focused goals. This produces deeper, more accurate, and more nuanced analysis. | **LangChain Agents** — Heavier runtime, more boilerplate for simple orchestration. CrewAI's role-based abstractions map directly to equity research workflows. **AutoGen** — Designed for multi-turn conversations between agents; our use case is task-based, not conversational. |
+| **[FastAPI](https://fastapi.tiangolo.com)** | Lightweight Python web framework with native `async/await`. Crucial for running background CrewAI tasks and streaming status updates to the frontend without blocking. Auto-generates OpenAPI docs. | **Flask** — No native async support. Would need Celery or threading for background tasks. **Django** — Too heavyweight for a REST API with no ORM needs. |
+| **[OpenAI GPT](https://openai.com)** | The LLM backbone powering CrewAI agents. Default model: `gpt-4o-mini` (fast, cost-efficient). Configurable via `.env`. | **Claude / Gemini** — CrewAI integrates natively with OpenAI. Switching to other providers would require custom LLM provider wrappers. |
+| **[asyncer](https://github.com/tiangolo/asyncer)** | Bridges sync CrewAI execution with FastAPI's async routes. Runs blocking agent tasks in background threads. | Built by the same author as FastAPI (tiangolo), so the integration is seamless. |
+| **[NumPy](https://numpy.org) + [Pandas](https://pandas.pydata.org)** | Portfolio analytics (Sharpe, Beta, volatility) require vectorized operations on price time series. NumPy handles the math; Pandas aligns dates across multiple tickers. | Already in our dependency tree for data collection. No reason to use alternatives. |
+| **[pytz](https://pypi.org/project/pytz/)** | Market status (NYSE/Euronext open/close) requires timezone-aware datetime arithmetic. | **zoneinfo** (stdlib) — Only available in Python 3.9+. pytz is more explicit and broadly compatible. |
+| **JSON File Persistence** | Portfolio data (holdings, transactions) stored as local JSON files. | **SQLite** — Would work, but adds migration complexity for a demo app. **Supabase/PostgreSQL** — Needed only for multi-user scenarios. JSON files match our existing caching pattern and require zero external setup. |
 
-### Frontend (React)
+### Frontend (React + Vite)
 
-| Technology | Why We Chose It |
-|-----------|----------------|
-| **[React](https://react.dev) + [Vite](https://vitejs.dev)** | React handles the complex state management needed for interactive dashboards (syncing 3D background, loading steppers, live status polling). Vite provides near-instant Hot Module Replacement for fast development. |
-| **[Tailwind CSS](https://tailwindcss.com)** | Utility-first CSS framework. Enables the premium, glassmorphic "Advisory Intelligence" aesthetic through standardized classes without messy external stylesheets. |
-| **[Recharts](https://recharts.org)** | Beautiful, responsive SVG charts that integrate cleanly with React state. Renders the 5-year equity performance chart. |
-| **[@react-three/fiber](https://docs.pmnd.rs/react-three-fiber)** | React renderer for Three.js. Powers the 3D particle network background on the landing page — the premium visual that signals institutional-grade software. |
-| **[react-markdown](https://github.com/remarkjs/react-markdown)** | Renders the AI-generated markdown reports and analyses directly in the UI. |
+| Technology | Why We Chose It | Why Not the Alternative |
+|-----------|----------------|------------------------|
+| **[React](https://react.dev)** | Handles the complex state management needed for interactive dashboards — syncing portfolio data, polling timers, modal state, routing, and 3D backgrounds. Component model maps cleanly to our UI structure (Holdings Table, Performance Cards, Market Status Bar, etc.). | **Vue.js** — Excellent framework, but our existing codebase was built with React. No reason to switch mid-project. **Vanilla JS** — Portfolio dashboard has too many interactive states (modals, polling, charts, routing) to manage without a framework. |
+| **[Vite](https://vitejs.dev)** | Near-instant Hot Module Replacement for fast development. Sub-4s production builds. | **Webpack** — Slower HMR, more configuration. **Next.js** — SSR/SSG unnecessary for a client-side dashboard that talks to a local FastAPI backend. |
+| **[React Router](https://reactrouter.com)** | Client-side routing between Portfolio Dashboard (`/`), Stock Detail (`/stock/:ticker`), and Transaction History (`/transactions`). | **Wouter** — Lighter, but React Router's nested routing and `useParams` are better suited for our `/stock/:ticker` pattern. |
+| **[Tailwind CSS](https://tailwindcss.com)** | Utility-first CSS framework. Enables the premium "Advisory Intelligence" aesthetic through standardized classes without messy external stylesheets. Custom design tokens (`altruistBlue`, `altruistGray`) provide consistency. | **CSS Modules** — More isolation, but loses the rapid prototyping speed of utility classes. **styled-components** — Runtime CSS-in-JS adds bundle overhead. |
+| **[Recharts](https://recharts.org)** | Beautiful, responsive SVG charts that integrate cleanly with React state. Used for equity performance, benchmark comparison (portfolio vs S&P 500), and sector allocation pie chart. | **Chart.js** — Canvas-based, harder to style with Tailwind. **D3.js** — Too low-level for dashboards. Recharts abstracts D3 with a React-native API. |
+| **[@react-three/fiber](https://docs.pmnd.rs/react-three-fiber)** | React renderer for Three.js. Powers the 3D particle network background on the empty portfolio state — the premium visual that signals institutional-grade software. | Only loaded on the empty state; doesn't affect dashboard performance. |
+| **[react-markdown](https://github.com/remarkjs/react-markdown)** | Renders the AI-generated markdown reports and analyses directly in the UI. Used for Executive Dossiers, News Analysis, and Daily Brief. | No viable alternative — markdown rendering in React requires a dedicated library. |
 
 ---
 
@@ -193,25 +253,33 @@ A concise, structured daily briefing generated by the "Chief Market Strategist" 
 
 ## How It Works
 
-### Flow 1: Stock Analysis
+### Flow 1: Portfolio Dashboard (Home Page)
 
-1. **User searches a ticker** (e.g., "AAPL") in the search bar.
+1. **User visits `/`** — the Portfolio Dashboard loads.
+2. **Holdings fetch:** `GET /api/portfolio/summary` returns all holdings enriched with live prices, P&L, and sector allocation.
+3. **Market status:** `GET /api/portfolio/market-status` calculates NYSE/Euronext open/close status with countdown timers.
+4. **Auto-refresh:** A polling loop refreshes holdings every 30s (market open) or 5min (market closed). A "Updated Xs ago" counter shows data freshness.
+5. **Performance:** `GET /api/portfolio/performance?period=1y` computes Sharpe, Beta, total return, and portfolio vs S&P 500 time series.
+6. **Empty state:** If no holdings exist, a 3D particle network background fills the page with an "Add Your First Holding" button.
+7. **Add holding:** The modal validates the ticker, records a buy transaction, and refreshes the dashboard.
+
+### Flow 2: Stock Analysis
+
+1. **User clicks a holding** in the dashboard (or navigates to `/stock/AAPL`).
 2. **Instant core data fetch:** `GET /api/company/AAPL` hits yfinance for prices, ratios, and financials. The chart and metrics render immediately.
 3. **Cache check:** `GET /api/research/AAPL` and `GET /api/news_analysis/AAPL` check for valid cached reports.
 4. **If cached:** The report/analysis is displayed instantly with a "Refresh" button.
-5. **If not cached:** A "Generate" button is shown. Clicking it triggers `POST /api/research/AAPL` or `POST /api/news_analysis/AAPL`.
+5. **If not cached:** A "Generate" button is shown. Clicking it triggers `POST /api/research/AAPL`.
 6. **Agent execution:** The backend collects full data, then runs the CrewAI agents. The frontend polls `/api/research/status/AAPL` every second, animating a step-by-step loading stepper in real time.
-7. **Report rendered:** The final markdown is displayed via `react-markdown` and cached to `cache/reports/AAPL.json` or `cache/news/AAPL.json`.
+7. **Report rendered:** The final markdown is displayed via `react-markdown` and cached to `cache/reports/AAPL.json`.
 
-### Flow 2: Daily Market Brief
+### Flow 3: Daily Market Brief
 
-1. **User visits the homepage** — the landing page loads with the 3D background and indices ribbon.
+1. **On the dashboard,** the Daily Brief panel is shown in the right sidebar.
 2. **Cache check:** `GET /api/market/brief` checks for a recent brief (< 24 hours old).
 3. **If cached:** The brief is displayed with a "Refresh" button and an age indicator.
 4. **If not cached:** A "Generate Daily Brief" button is shown. Clicking it triggers `POST /api/market/brief`.
-5. **Data collection:** The backend fetches Finnhub headlines (20), FRED macro snapshot, GDELT world headlines (15), and yfinance index data.
-6. **Agent synthesis:** The Chief Market Strategist agent produces a structured 4-section brief: Markets, Macro, World, Outlook.
-7. **Brief rendered:** Displayed on the landing page and cached to `cache/briefs/daily.json`.
+5. **Agent synthesis:** The Chief Market Strategist agent produces a structured 4-section brief.
 
 ---
 
@@ -221,14 +289,17 @@ All AI-generated content is cached to the filesystem for persistence across serv
 
 | Content | Cache Location | Expiration | Behavior |
 |---------|---------------|-----------|----------|
-| **Executive Dossier** | `cache/reports/{TICKER}.json` | 30 days | Show cached report with "Refresh" button. If expired/missing, show "Generate" button. Expired reports are **never** displayed. |
-| **News Analysis** | `cache/news/{TICKER}.json` | 7 days | Same pattern — "Refresh" if valid, "Generate" if expired/missing. |
-| **Daily Market Brief** | `cache/briefs/daily.json` | 24 hours | Same pattern — one single global file, not per-ticker. |
+| **Executive Dossier** | `cache/reports/{TICKER}.json` | 30 days | Show cached report with "Refresh" button. If expired/missing, show "Generate" button. |
+| **News Analysis** | `cache/news/{TICKER}.json` | 7 days | Same pattern. |
+| **Daily Market Brief** | `cache/briefs/daily.json` | 24 hours | One single global file, not per-ticker. |
+| **Portfolio Holdings** | `cache/portfolio/holdings.json` | Never expires | Persistent store. Updated on add/remove only. |
+| **Transactions** | `cache/portfolio/transactions.json` | Never expires | Append-only log. |
 
 **Key rules:**
 - Reports are **never auto-generated** — always require user action.
 - Expired reports are **never shown** — the user sees a clean "Generate" prompt instead.
 - All generation has a visible loading state with real-time status polling.
+- Portfolio prices are auto-refreshed (30s/5min) but portfolio holdings are persistent.
 
 ---
 
@@ -289,8 +360,6 @@ Open **http://localhost:5173** in your browser.
 
 ### CLI Mode (Optional)
 
-You can also generate reports from the command line:
-
 ```bash
 python main.py AAPL
 ```
@@ -303,7 +372,7 @@ The report will be saved to `output/reports/` as a Markdown file.
 
 ```
 kereneye/
-├── api.py                         # FastAPI backend (all REST endpoints)
+├── api.py                         # FastAPI backend (REST endpoints + portfolio API)
 ├── config.py                      # API keys & settings (loaded from .env)
 ├── main.py                        # CLI entry point
 ├── requirements.txt               # Python dependencies
@@ -312,7 +381,7 @@ kereneye/
 ├── data/
 │   └── collector.py               # Data engine (yfinance, Finnhub, FRED, Benzinga, Polygon, GDELT)
 │                                  #   → CompanyData, MarketBriefData dataclasses
-│                                  #   → collect_core_data(), collect_full_data(), collect_market_brief_data()
+│                                  #   → collect_core_data(), collect_full_data()
 │                                  #   → Format helpers for agent context injection
 │
 ├── crew/
@@ -321,21 +390,38 @@ kereneye/
 │                                  #   → run_news_analysis_crew() (1-agent News Analyst)
 │                                  #   → run_market_brief_crew() (1-agent Market Strategist)
 │
+├── portfolio/                     # Portfolio tracker backend (NEW)
+│   ├── __init__.py
+│   ├── models.py                  # Holding, Transaction, EnrichedHolding, PortfolioSummary
+│   ├── manager.py                 # CRUD + JSON persistence + yfinance live enrichment
+│   └── analytics.py               # Sharpe, Beta, returns, benchmark comparison
+│
 ├── tools/
 │   ├── technical_tools.py         # RSI, MACD, MA, Bollinger, volatility computation
 │   └── chart_tools.py             # Price chart generation
 │
-├── cache/                         # Persistent JSON cache (auto-created)
+├── cache/                         # Persistent storage (auto-created)
 │   ├── reports/                   #   → {TICKER}.json (30-day expiration)
 │   ├── news/                      #   → {TICKER}.json (7-day expiration)
-│   └── briefs/                    #   → daily.json (24-hour expiration)
+│   ├── briefs/                    #   → daily.json (24-hour expiration)
+│   └── portfolio/                 #   → holdings.json, transactions.json (persistent)
 │
-├── frontend/                      # React + Vite + Tailwind
+├── frontend/                      # React + Vite + Tailwind + React Router
 │   ├── src/
-│   │   ├── App.jsx                # Main dashboard component
+│   │   ├── App.jsx                # Route-based layout with global header
+│   │   ├── main.jsx               # Entry point with BrowserRouter
 │   │   ├── Background3D.jsx       # Three.js particle network
-│   │   └── index.css              # Tailwind config + custom styles
-│   └── package.json
+│   │   ├── index.css              # Tailwind config + custom utilities
+│   │   ├── pages/
+│   │   │   ├── PortfolioDashboard.jsx  # Main dashboard (holdings, charts, brief)
+│   │   │   ├── StockDetail.jsx         # Single-stock analysis view
+│   │   │   └── TransactionHistory.jsx  # Buy/sell transaction log
+│   │   └── components/
+│   │       ├── AddHoldingModal.jsx      # Add holding form with validation
+│   │       ├── PerformanceCards.jsx     # Sharpe, Beta, return, volatility display
+│   │       └── MarketStatusBar.jsx      # NYSE/Euronext status + live countdown
+│   ├── package.json
+│   └── tailwind.config.js
 │
 └── output/
     └── reports/                   # CLI-generated markdown reports
@@ -345,7 +431,16 @@ kereneye/
 
 ## Output
 
-### Executive Dossier includes:
+### Portfolio Dashboard
+- Holdings table with live prices and P&L
+- Sector allocation pie chart
+- Portfolio vs S&P 500 benchmark chart
+- Performance metrics (Sharpe, Beta, volatility, return)
+- Market status bar with live countdown
+- Daily Market Brief
+- Holdings news feed
+
+### Executive Dossier (Per-Ticker)
 1. **Executive Summary** — Investment thesis + Buy/Hold/Sell recommendation
 2. **Company Overview** — Business description, key facts
 3. **Financial Analysis** — Revenue trends, margins, balance sheet, cash flow
@@ -356,12 +451,11 @@ kereneye/
 8. **Risk Factors** — Consolidated risks
 9. **Investment Recommendation** — Final rating with confidence level
 
-### News Analysis includes:
+### News Analysis (Per-Ticker)
 - Filtered, recent (< 7 day) news from Benzinga and Polygon
 - Per-article impact explanation on the stock
-- Clear, noise-free presentation
 
-### Daily Market Brief includes:
+### Daily Market Brief
 - Index performance (S&P 500, Nasdaq, FTSE, DAX, CAC, Nikkei)
 - Macro snapshot (Fed Funds, CPI, Unemployment, GDP, Yield Spread)
 - Geopolitical/world events affecting markets
