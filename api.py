@@ -398,5 +398,201 @@ async def get_market_overview():
     data = await asyncer.asyncify(fetch_market_data)()
     return data
 
+# ===========================================================================
+# PORTFOLIO ENDPOINTS
+# ===========================================================================
+
+from portfolio.manager import PortfolioManager
+from portfolio.analytics import calculate_portfolio_performance
+
+_portfolio_manager = PortfolioManager()
+
+
+class AddHoldingRequest(BaseModel):
+    ticker: str
+    shares: float
+    avg_cost: float
+
+
+@app.get("/api/portfolio/holdings")
+async def get_portfolio_holdings():
+    """Get all holdings with current prices and P&L."""
+    try:
+        enriched = await asyncer.asyncify(_portfolio_manager.get_enriched_holdings)()
+        return {
+            "holdings": [h.to_dict() for h in enriched],
+            "last_updated": datetime.now().isoformat(),
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/portfolio/holdings")
+async def add_portfolio_holding(req: AddHoldingRequest):
+    """Add a new holding (or increase existing position)."""
+    ticker = req.ticker.upper()
+
+    # Validate that the ticker exists
+    try:
+        info = await asyncer.asyncify(lambda: yf.Ticker(ticker).info)()
+        name = info.get("longName", info.get("shortName", ""))
+        if not name or name == ticker:
+            # Could be invalid
+            price = info.get("currentPrice", info.get("regularMarketPrice"))
+            if not price:
+                raise HTTPException(status_code=404, detail=f"Ticker '{ticker}' not found.")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=404, detail=f"Ticker '{ticker}' not found: {e}")
+
+    holding = _portfolio_manager.add_holding(ticker, req.shares, req.avg_cost)
+    return {"message": f"Added {req.shares} shares of {ticker}", "holding": holding.to_dict()}
+
+
+@app.delete("/api/portfolio/holdings/{ticker}")
+async def remove_portfolio_holding(ticker: str):
+    """Remove a holding from the portfolio."""
+    ticker = ticker.upper()
+    success = await asyncer.asyncify(_portfolio_manager.remove_holding)(ticker)
+    if not success:
+        raise HTTPException(status_code=404, detail=f"Holding '{ticker}' not found in portfolio.")
+    return {"message": f"Removed {ticker} from portfolio"}
+
+
+@app.get("/api/portfolio/summary")
+async def get_portfolio_summary():
+    """Get full portfolio summary with P&L and sector allocation."""
+    try:
+        summary = await asyncer.asyncify(_portfolio_manager.get_portfolio_summary)()
+        return summary.to_dict()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/portfolio/performance")
+async def get_portfolio_performance(period: str = "1y"):
+    """Get portfolio performance metrics (Sharpe, Beta, returns, benchmark comparison)."""
+    valid_periods = ["1mo", "3mo", "6mo", "1y", "2y", "5y", "ytd"]
+    if period not in valid_periods:
+        raise HTTPException(status_code=400, detail=f"Invalid period. Use one of: {valid_periods}")
+
+    try:
+        enriched = await asyncer.asyncify(_portfolio_manager.get_enriched_holdings)()
+        performance = await asyncer.asyncify(calculate_portfolio_performance)(enriched, period)
+        return performance
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/portfolio/transactions")
+async def get_portfolio_transactions():
+    """Get all transaction history (newest first)."""
+    transactions = _portfolio_manager.get_transactions()
+    return {"transactions": transactions}
+
+
+@app.get("/api/portfolio/news")
+async def get_portfolio_news():
+    """Aggregate recent news headlines for all portfolio holdings."""
+    holdings = _portfolio_manager.get_holdings()
+    if not holdings:
+        return {"holdings_news": []}
+
+    def fetch_all_news():
+        results = []
+        tickers_str = " ".join(h.ticker for h in holdings)
+        tickers_obj = yf.Tickers(tickers_str)
+
+        for holding in holdings:
+            try:
+                ticker = tickers_obj.tickers[holding.ticker]
+                news_raw = ticker.news or []
+                news_items = []
+                for item in news_raw[:5]:
+                    news_items.append({
+                        "title": item.get("title", ""),
+                        "publisher": item.get("publisher", ""),
+                        "link": item.get("link", ""),
+                    })
+                results.append({
+                    "ticker": holding.ticker,
+                    "news": news_items,
+                })
+            except Exception as e:
+                print(f"  ⚠ News fetch failed for {holding.ticker}: {e}")
+                results.append({"ticker": holding.ticker, "news": []})
+
+        return results
+
+    holdings_news = await asyncer.asyncify(fetch_all_news)()
+    return {"holdings_news": holdings_news}
+
+
+@app.get("/api/portfolio/market-status")
+async def get_market_status():
+    """
+    Returns open/closed status for NYSE and Euronext, with countdown to next transition.
+    Pure time-based calculation (no API calls).
+    """
+    import pytz
+    now_utc = datetime.now(pytz.utc)
+
+    def _get_status(tz_name: str, open_hour: int, open_min: int, close_hour: int, close_min: int):
+        tz = pytz.timezone(tz_name)
+        now_local = now_utc.astimezone(tz)
+        weekday = now_local.weekday()  # 0=Mon, 6=Sun
+
+        open_time = now_local.replace(hour=open_hour, minute=open_min, second=0, microsecond=0)
+        close_time = now_local.replace(hour=close_hour, minute=close_min, second=0, microsecond=0)
+
+        is_weekday = weekday < 5
+        is_market_hours = is_weekday and open_time <= now_local < close_time
+
+        if is_market_hours:
+            # Countdown to close
+            diff = close_time - now_local
+            return {
+                "is_open": True,
+                "countdown_label": "Closes in",
+                "countdown_seconds": int(diff.total_seconds()),
+            }
+        else:
+            # Countdown to next open
+            if is_weekday and now_local < open_time:
+                # Today, before open
+                next_open = open_time
+            else:
+                # After close or weekend — find next weekday
+                days_ahead = 1
+                if weekday == 4 and now_local >= close_time:  # Friday after close
+                    days_ahead = 3
+                elif weekday == 5:  # Saturday
+                    days_ahead = 2
+                elif weekday == 6:  # Sunday
+                    days_ahead = 1
+
+                next_open = (now_local + timedelta(days=days_ahead)).replace(
+                    hour=open_hour, minute=open_min, second=0, microsecond=0
+                )
+
+            diff = next_open - now_local
+            return {
+                "is_open": False,
+                "countdown_label": "Opens in",
+                "countdown_seconds": int(diff.total_seconds()),
+            }
+
+    # NYSE: 9:30 AM – 4:00 PM ET
+    nyse = _get_status("America/New_York", 9, 30, 16, 0)
+    nyse["name"] = "NYSE"
+
+    # Euronext: 9:00 AM – 5:30 PM CET
+    euronext = _get_status("Europe/Paris", 9, 0, 17, 30)
+    euronext["name"] = "Euronext"
+
+    return {"markets": [nyse, euronext]}
+
+
 if __name__ == "__main__":
     uvicorn.run("api:app", host="0.0.0.0", port=8000, reload=True)

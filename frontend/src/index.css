@@ -38,6 +38,25 @@
   .hide-scrollbar::-webkit-scrollbar {
     display: none;
   }
+
+  /* Thin, themed scrollbar */
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 4px;
+  }
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: #D1D5DB;
+    border-radius: 2px;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: #9CA3AF;
+  }
+  .custom-scrollbar {
+    scrollbar-width: thin;
+    scrollbar-color: #D1D5DB transparent;
+  }
 }
 
 @keyframes shimmer {
