@@ -333,36 +333,8 @@ function App() {
               )}
             </div>
 
-            {/* CENTER BRANDING & SEARCH PROMPT REMOVED TO SHOWCASE FULL 3D BG */}
+            {/* CENTER AREA */}
             <div className="relative z-10 flex-1 flex flex-col items-center justify-center pointer-events-none p-12">
-
-              {/* SCATTERED MARKET HEADLINES LIST */}
-              {marketData && marketData.news && marketData.news.length > 0 && (
-                <div className="absolute inset-0 pointer-events-none overflow-hidden z-20">
-                  {marketData.news.slice(0, 5).map((item, i) => {
-                    // Pre-defined scattered aesthetic positions
-                    const positions = [
-                      { top: '22%', left: '8%' },
-                      { top: '15%', right: '12%' },
-                      { bottom: '25%', left: '10%' },
-                      { bottom: '15%', right: '8%' },
-                      { top: '55%', left: '65%', transform: 'translateY(-50%)' },
-                    ];
-                    const pos = positions[i] || {};
-                    return (
-                      <div key={i} className="absolute max-w-[320px] pointer-events-auto transition-transform hover:scale-105 duration-300 animate-fade-in-up" style={{ ...pos, animationDelay: `${i * 150}ms` }}>
-                        <a href={item.link} target="_blank" rel="noopener noreferrer" className="block bg-altruistWhite/70 backdrop-blur-md border border-altruistGray-200/50 p-5 shadow-lg hover:shadow-xl hover:bg-altruistWhite/90 transition-all rounded-sm">
-                          <div className="flex items-center gap-2 mb-2">
-                            <div className="w-1.5 h-1.5 rounded-full bg-altruistBlue"></div>
-                            <p className="text-[10px] font-bold text-altruistGray-500 uppercase tracking-widest">{item.publisher}</p>
-                          </div>
-                          <h3 className="text-[13px] font-medium text-altruistDark leading-snug">{item.title}</h3>
-                        </a>
-                      </div>
-                    )
-                  })}
-                </div>
-              )}
             </div>
 
             {/* DAILY MARKET BRIEF */}
