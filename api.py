@@ -18,6 +18,8 @@ from datetime import datetime, timedelta
 
 from data.collector import DataCollector, MarketBriefData
 from crew.research_crew import run_research_crew, run_news_analysis_crew, run_market_brief_crew
+from portfolio.manager import PortfolioManager
+from portfolio.analytics import calculate_portfolio_performance
 
 app = FastAPI(title="KerenEye API Dashboard")
 
@@ -402,9 +404,6 @@ async def get_market_overview():
 # PORTFOLIO ENDPOINTS
 # ===========================================================================
 
-from portfolio.manager import PortfolioManager
-from portfolio.analytics import calculate_portfolio_performance
-
 _portfolio_manager = PortfolioManager()
 
 
@@ -433,14 +432,20 @@ async def add_portfolio_holding(req: AddHoldingRequest):
     ticker = req.ticker.upper()
 
     # Validate that the ticker exists
-    try:
-        info = await asyncer.asyncify(lambda: yf.Ticker(ticker).info)()
-        name = info.get("longName", info.get("shortName", ""))
-        if not name or name == ticker:
-            # Could be invalid
-            price = info.get("currentPrice", info.get("regularMarketPrice"))
+    def _validate_ticker(t):
+        try:
+            info = yf.Ticker(t).info or {}
+            price = info.get("currentPrice") or info.get("regularMarketPrice") or info.get("previousClose")
             if not price:
-                raise HTTPException(status_code=404, detail=f"Ticker '{ticker}' not found.")
+                return None
+            return info
+        except Exception:
+            return None
+
+    try:
+        info = await asyncer.asyncify(_validate_ticker)(ticker)
+        if info is None:
+            raise HTTPException(status_code=404, detail=f"Ticker '{ticker}' not found.")
     except HTTPException:
         raise
     except Exception as e:
