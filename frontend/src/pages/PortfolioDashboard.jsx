@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   TrendingUp, TrendingDown, Plus, RefreshCw, Activity, DollarSign,
-  LayoutDashboard, Newspaper, Clock, ExternalLink, Wallet
+  LayoutDashboard, Newspaper, Clock, ExternalLink, Wallet, Sparkles
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, LineChart, Line, XAxis, YAxis } from 'recharts';
@@ -45,6 +45,9 @@ export default function PortfolioDashboard() {
   // Holdings news
   const [holdingsNews, setHoldingsNews] = useState([]);
   const [loadingNews, setLoadingNews] = useState(false);
+  const [portfolioNewsReport, setPortfolioNewsReport] = useState(null);
+  const [loadingNewsReport, setLoadingNewsReport] = useState(false);
+  const [newsReportStatus, setNewsReportStatus] = useState('');
 
   // Market status
   const [marketStatus, setMarketStatus] = useState(null);
@@ -139,6 +142,36 @@ export default function PortfolioDashboard() {
       setLoadingNews(false);
     }
   }, [holdings.length]);
+
+  const generateAiNewsReport = async () => {
+    try {
+      setLoadingNewsReport(true);
+      setNewsReportStatus('Fetching recent news...');
+
+      const statusInterval = setInterval(async () => {
+        try {
+          const statusRes = await fetch(`${API}/api/portfolio/news/analyze/status`);
+          if (statusRes.ok) {
+            const statusData = await statusRes.json();
+            setNewsReportStatus(statusData.status || '');
+          }
+        } catch (e) { /* ignore */ }
+      }, 2000);
+
+      const res = await fetch(`${API}/api/portfolio/news/analyze`, { method: 'POST' });
+      clearInterval(statusInterval);
+
+      if (!res.ok) throw new Error('Failed to generate AI news report');
+      const data = await res.json();
+      setPortfolioNewsReport(data.report);
+      setNewsReportStatus('');
+    } catch (e) {
+      console.error(e);
+      setPortfolioNewsReport('Failed to generate report. Please try again later.');
+    } finally {
+      setLoadingNewsReport(false);
+    }
+  };
 
   // ---------------------------------------------------------------
   // Initial load
@@ -538,15 +571,43 @@ export default function PortfolioDashboard() {
                     <h3 className="text-[13px] font-bold text-altruistGray-800 uppercase tracking-wide flex items-center gap-2">
                       <Newspaper className="w-4 h-4 text-altruistBlue" /> Holdings News Feed
                     </h3>
-                    <button
-                      onClick={fetchHoldingsNews}
-                      disabled={loadingNews}
-                      className="text-[10px] font-bold text-altruistBlue uppercase tracking-widest hover:text-blue-800 transition-colors disabled:opacity-50 flex items-center gap-1 bg-altruistBlue/10 px-2.5 py-1 rounded-sm"
-                    >
-                      {loadingNews ? <RefreshCw className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
-                      Refresh
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={generateAiNewsReport}
+                        disabled={loadingNewsReport || holdingsNews.length === 0}
+                        className="text-[10px] font-bold text-altruistBlue uppercase tracking-widest hover:text-blue-800 transition-colors disabled:opacity-50 flex items-center gap-1 bg-altruistBlue/10 px-2.5 py-1 rounded-sm"
+                      >
+                        {loadingNewsReport ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
+                        {loadingNewsReport ? (newsReportStatus || 'Synthesizing...') : 'AI Impact Report'}
+                      </button>
+                      <button
+                        onClick={fetchHoldingsNews}
+                        disabled={loadingNews}
+                        className="text-[10px] font-bold text-altruistBlue uppercase tracking-widest hover:text-blue-800 transition-colors disabled:opacity-50 flex items-center gap-1 bg-altruistBlue/10 px-2.5 py-1 rounded-sm"
+                      >
+                        {loadingNews ? <RefreshCw className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+                        Refresh
+                      </button>
+                    </div>
                   </div>
+                  
+                  {/* AI Report Container */}
+                  {portfolioNewsReport && (
+                    <div className="border-b border-altruistBlue/20 bg-[#F0F4F8] px-6 py-5">
+                      <div className="flex items-center gap-2 mb-3">
+                        <Sparkles className="w-4 h-4 text-altruistBlue" />
+                        <h4 className="text-[12px] font-bold text-altruistDark uppercase tracking-widest">
+                          AI Executive Summary
+                        </h4>
+                      </div>
+                      <div className="prose prose-sm prose-blue max-w-none text-[13px] text-altruistDark/90 whitespace-pre-wrap leading-relaxed">
+                        <ReactMarkdown>
+                          {portfolioNewsReport}
+                        </ReactMarkdown>
+                      </div>
+                    </div>
+                  )}
+
                   <div className="divide-y divide-altruistGray-100 max-h-[500px] overflow-y-auto custom-scrollbar">
                     {holdingsNews.map((hn) =>
                       hn.news.map((article, j) => (

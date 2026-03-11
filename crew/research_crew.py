@@ -405,6 +405,59 @@ Do NOT include generic company profiling or financial ratios. Focus solely on th
     return [recent_news_task]
 
 # ---------------------------------------------------------------------------
+# Portfolio News Digest
+# ---------------------------------------------------------------------------
+
+def _create_portfolio_news_tasks(agents: dict, portfolio_news_str: str) -> list:
+    """Create the task for the Portfolio Manager to analyze all holdings' news."""
+    
+    pm_strategist = Agent(
+        role="Chief Portfolio Strategist",
+        goal=(
+            "Review the aggregated news across the entire portfolio and provide a deeply insightful, "
+            "reflective analysis on how these events structurally impact the holdings. Identify "
+            "hidden risks, compounding catalysts, and broader macro implications."
+        ),
+        backstory=(
+            "You are a legendary hedge fund portfolio manager. You filter out algorithmic noise "
+            "and focus on existential shifts. You don't just regurgitate the news; you reflect on "
+            "what it means for the business model, the moat, and the sector. When a holding reports "
+            "news, you instantly connect it to the bigger picture. You are ruthless, objective, and deeply insightful."
+        ),
+        verbose=False,
+        allow_delegation=False,
+        llm=OPENAI_MODEL_NAME,
+    )
+
+    pm_task = Task(
+        description=f"""
+You are the Chief Portfolio Strategist analyzing the recent news flow for the entire portfolio.
+
+AGGREGATED RECENT NEWS FOR OPEN POSITIONS:
+{portfolio_news_str}
+
+Provide a deeply reflective and insightful impact report. Do NOT just list the headlines.
+1. Distill the Noise: Filter out generic press releases, minor product updates, and clickbait.
+2. The Real Story: What is the underlying theme or structural shift happening across these holdings? Are multiple companies in the portfolio facing similar macro/industry headwinds or tailwinds?
+3. Impact Assessment: For the holdings with exactly material news, reflect on how this changes their long-term thesis or short-term volatility. Are their moats expanding or decaying because of this?
+
+Format your response exactly as follows:
+### Portfolio Wide Insights
+[1-2 paragraphs reflecting on the broader themes or interconnected impacts across the holdings based on the news]
+
+### Key Catalyst Breakdown
+- **[TICKER]**: [Deep, insightful reflection on the specific news and what it actually means for the stock]
+- **[TICKER]**: [Deep, insightful reflection on the specific news and what it actually means for the stock]
+
+If there is no material news for the portfolio, state that the portfolio is operating under normal conditions with no immediate catalysts.
+""",
+        agent=pm_strategist,
+        expected_output="An insightful, PM-level reflection on the structural impact of the recent holding news.",
+    )
+
+    return [pm_strategist, pm_task]
+
+# ---------------------------------------------------------------------------
 # Crew Runners
 # ---------------------------------------------------------------------------
 
@@ -573,6 +626,37 @@ RULES:
     )
 
     print("🚀 Running Chief Market Strategist...\n")
+    result = crew.kickoff()
+
+    return str(result)
+
+def run_portfolio_news_crew(portfolio_news_str: str, progress_callback=None) -> str:
+    """
+    Run an isolated CrewAI agent to scan recent news across the entire portfolio
+    and generate a reflective PM-level impact report.
+    """
+    print("\n📰 Initializing Portfolio News crew...\n")
+
+    # Create dummy agents dict since _create_portfolio_news_tasks signature expects it
+    agents = {} 
+    pm_strategist, pm_task = _create_portfolio_news_tasks(agents, portfolio_news_str)
+
+    if progress_callback:
+        progress_callback("Synthesizing Portfolio News")
+
+    def task_completed_cb(output):
+        if progress_callback:
+            progress_callback("Formatting PM Report")
+
+    crew = Crew(
+        agents=[pm_strategist],
+        tasks=[pm_task],
+        process=Process.sequential,
+        verbose=True,
+        task_callback=task_completed_cb,
+    )
+
+    print("🚀 Running Chief Portfolio Strategist...\n")
     result = crew.kickoff()
 
     return str(result)

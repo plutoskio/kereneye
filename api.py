@@ -17,7 +17,7 @@ import config
 from datetime import datetime, timedelta
 
 from data.collector import DataCollector, MarketBriefData
-from crew.research_crew import run_research_crew, run_news_analysis_crew, run_market_brief_crew
+from crew.research_crew import run_research_crew, run_news_analysis_crew, run_market_brief_crew, run_portfolio_news_crew
 from portfolio.manager import PortfolioManager
 from portfolio.analytics import calculate_portfolio_performance
 
@@ -587,6 +587,55 @@ async def get_portfolio_news():
 
     holdings_news = await asyncer.asyncify(fetch_all_news)()
     return {"holdings_news": holdings_news}
+
+
+_portfolio_news_task_status = {"status": "Idle"}
+
+@app.get("/api/portfolio/news/analyze/status")
+async def get_portfolio_news_status():
+    """Returns the current generation status for the AI impact report."""
+    return _portfolio_news_task_status
+
+@app.post("/api/portfolio/news/analyze")
+async def analyze_portfolio_news():
+    """Run an AI Crew to deeply reflect on the recent news for all portfolio holdings."""
+    _portfolio_news_task_status["status"] = "Fetching recent news..."
+    
+    # 1. Fetch current news
+    news_res = await get_portfolio_news()
+    holdings_news = news_res.get("holdings_news", [])
+    
+    if not holdings_news:
+        _portfolio_news_task_status["status"] = "No news found."
+        return {"report": "No holdings or no recent news available to analyze."}
+
+    # 2. Format it into an aggressive text block for the agent
+    _portfolio_news_task_status["status"] = "Structuring data for analysis..."
+    news_text = "PORTFOLIO NEWS DIGEST:\n\n"
+    for hn in holdings_news:
+        news_text += f"TICKER: {hn['ticker']}\n"
+        if not hn['news']:
+            news_text += "  - No material news found.\n"
+        else:
+            for article in hn['news']:
+                news_text += f"  - [{article['publisher']}] {article['title']} ({article['link']})\n"
+        news_text += "\n"
+
+    def progress_callback(status: str):
+        _portfolio_news_task_status["status"] = status
+
+    # 3. Fire off the backend PM agent
+    def run_agent():
+        return run_portfolio_news_crew(news_text, progress_callback)
+
+    try:
+        _portfolio_news_task_status["status"] = "Initializing AI analysis..."
+        report = await asyncer.asyncify(run_agent)()
+        _portfolio_news_task_status["status"] = "Complete"
+        return {"report": report}
+    except Exception as e:
+        _portfolio_news_task_status["status"] = "Error formatting report"
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/api/portfolio/market-status")
