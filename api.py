@@ -551,10 +551,29 @@ async def get_portfolio_news():
                 news_raw = ticker.news or []
                 news_items = []
                 for item in news_raw[:5]:
+                    # Handle both old flat format and new nested 'content' format
+                    content = item.get("content", item)
+                    
+                    title = content.get("title", "")
+                    
+                    # Extract publisher
+                    provider = content.get("provider")
+                    if isinstance(provider, dict):
+                        publisher = provider.get("displayName", "")
+                    else:
+                        publisher = content.get("publisher", "")
+                        
+                    # Extract link
+                    url_obj = content.get("clickThroughUrl") or content.get("canonicalUrl")
+                    if isinstance(url_obj, dict):
+                        link = url_obj.get("url", "")
+                    else:
+                        link = content.get("link", "")
+                        
                     news_items.append({
-                        "title": item.get("title", ""),
-                        "publisher": item.get("publisher", ""),
-                        "link": item.get("link", ""),
+                        "title": title,
+                        "publisher": publisher,
+                        "link": link,
                     })
                 results.append({
                     "ticker": holding.ticker,
