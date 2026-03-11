@@ -411,6 +411,7 @@ class AddHoldingRequest(BaseModel):
     ticker: str
     shares: float
     avg_cost: float
+    date: str | None = None  # ISO date string, e.g. "2025-06-15". Defaults to today.
 
 
 class SellRequest(BaseModel):
@@ -460,7 +461,7 @@ async def add_portfolio_holding(req: AddHoldingRequest):
     except Exception as e:
         raise HTTPException(status_code=404, detail=f"Ticker '{ticker}' not found: {e}")
 
-    holding = _portfolio_manager.add_holding(ticker, req.shares, req.avg_cost)
+    holding = _portfolio_manager.add_holding(ticker, req.shares, req.avg_cost, req.date)
     return {"message": f"Added {req.shares} shares of {ticker}", "holding": holding.to_dict()}
 
 

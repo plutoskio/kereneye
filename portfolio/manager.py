@@ -107,7 +107,7 @@ class PortfolioManager:
     # CRUD operations
     # -------------------------------------------------------------------
 
-    def add_holding(self, ticker: str, shares: float, avg_cost: float) -> Holding:
+    def add_holding(self, ticker: str, shares: float, avg_cost: float, date_added: str | None = None) -> Holding:
         """
         Add a holding to the portfolio. If the ticker already exists,
         recalculate average cost with weighted average.
@@ -129,7 +129,7 @@ class PortfolioManager:
                 ticker=ticker,
                 shares=shares,
                 avg_cost=avg_cost,
-                date_added=datetime.now().isoformat(),
+                date_added=date_added or datetime.now().isoformat(),
             )
             holdings.append(new_holding)
             result = new_holding

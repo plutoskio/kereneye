@@ -217,12 +217,12 @@ export default function PortfolioDashboard() {
   // ---------------------------------------------------------------
   // Holding actions
   // ---------------------------------------------------------------
-  const handleAddHolding = async (ticker, shares, avgCost) => {
+  const handleAddHolding = async (ticker, shares, avgCost, date) => {
     try {
       const res = await fetch(`${API}/api/portfolio/holdings`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ticker, shares, avg_cost: avgCost }),
+        body: JSON.stringify({ ticker, shares, avg_cost: avgCost, date }),
       });
       if (!res.ok) {
         const err = await res.json();

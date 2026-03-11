@@ -5,18 +5,19 @@ export default function AddHoldingModal({ onClose, onAdd }) {
   const [ticker, setTicker] = useState('');
   const [shares, setShares] = useState('');
   const [avgCost, setAvgCost] = useState('');
+  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!ticker.trim() || !shares || !avgCost) return;
+    if (!ticker.trim() || !shares || !avgCost || !date) return;
 
     setLoading(true);
     setError(null);
 
     try {
-      await onAdd(ticker.trim().toUpperCase(), parseFloat(shares), parseFloat(avgCost));
+      await onAdd(ticker.trim().toUpperCase(), parseFloat(shares), parseFloat(avgCost), date);
     } catch (err) {
       setError(err.message || 'Failed to add holding');
       setLoading(false);
@@ -66,8 +67,8 @@ export default function AddHoldingModal({ onClose, onAdd }) {
             </div>
           </div>
 
-          {/* Shares & Price row */}
-          <div className="grid grid-cols-2 gap-4">
+          {/* Shares, Price & Date row */}
+          <div className="grid grid-cols-3 gap-4">
             <div>
               <label className="block text-[11px] font-bold text-altruistGray-500 uppercase tracking-widest mb-2">
                 Shares
@@ -98,6 +99,19 @@ export default function AddHoldingModal({ onClose, onAdd }) {
                 required
               />
             </div>
+            <div>
+              <label className="block text-[11px] font-bold text-altruistGray-500 uppercase tracking-widest mb-2">
+                Date
+              </label>
+              <input
+                type="date"
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+                max={new Date().toISOString().split('T')[0]}
+                className="w-full bg-altruistGray-50 border border-altruistGray-200 rounded-sm px-4 py-3 text-[14px] font-mono text-altruistDark focus:outline-none focus:border-altruistBlue focus:bg-altruistWhite transition-colors"
+                required
+              />
+            </div>
           </div>
 
           {/* Preview */}
@@ -116,7 +130,7 @@ export default function AddHoldingModal({ onClose, onAdd }) {
           {/* Submit */}
           <button
             type="submit"
-            disabled={loading || !ticker || !shares || !avgCost}
+            disabled={loading || !ticker || !shares || !avgCost || !date}
             className="w-full bg-altruistBlue text-white py-3 rounded-sm text-[13px] font-bold uppercase tracking-wide hover:bg-blue-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
           >
             {loading ? (
