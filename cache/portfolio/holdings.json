@@ -4,5 +4,17 @@
     "shares": 2.0,
     "avg_cost": 654.11,
     "date_added": "2026-03-11T12:38:11.496196"
+  },
+  {
+    "ticker": "MSFT",
+    "shares": 9.0,
+    "avg_cost": 413.53,
+    "date_added": "2026-03-11T12:40:04.567568"
+  },
+  {
+    "ticker": "GAMB",
+    "shares": 186.0,
+    "avg_cost": 6.63,
+    "date_added": "2026-03-11T12:40:38.729728"
   }
 ]

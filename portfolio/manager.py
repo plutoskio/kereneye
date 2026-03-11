@@ -1,7 +1,7 @@
 """
 Portfolio Manager — CRUD operations with JSON file persistence.
 
-Manages holdings and transactions, persisted to cache/portfolio/.
+Manages holdings, transactions, and cash balance, persisted to cache/portfolio/.
 Fetches live prices via yfinance for real-time P&L calculations.
 """
 
@@ -22,19 +22,19 @@ from .models import Holding, Transaction, EnrichedHolding, PortfolioSummary
 CACHE_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "cache", "portfolio")
 HOLDINGS_FILE = os.path.join(CACHE_DIR, "holdings.json")
 TRANSACTIONS_FILE = os.path.join(CACHE_DIR, "transactions.json")
+CASH_FILE = os.path.join(CACHE_DIR, "cash.json")
 
 os.makedirs(CACHE_DIR, exist_ok=True)
 
 
 class PortfolioManager:
-    """Manages portfolio holdings and transactions with JSON persistence."""
+    """Manages portfolio holdings, transactions, and cash with JSON persistence."""
 
     # -------------------------------------------------------------------
     # Persistence helpers
     # -------------------------------------------------------------------
 
     def _load_holdings(self) -> list[Holding]:
-        """Load holdings from JSON file."""
         if not os.path.exists(HOLDINGS_FILE):
             return []
         try:
@@ -45,12 +45,10 @@ class PortfolioManager:
             return []
 
     def _save_holdings(self, holdings: list[Holding]) -> None:
-        """Save holdings to JSON file."""
         with open(HOLDINGS_FILE, "w") as f:
             json.dump([h.to_dict() for h in holdings], f, indent=2)
 
     def _load_transactions(self) -> list[Transaction]:
-        """Load transactions from JSON file."""
         if not os.path.exists(TRANSACTIONS_FILE):
             return []
         try:
@@ -61,15 +59,49 @@ class PortfolioManager:
             return []
 
     def _save_transactions(self, transactions: list[Transaction]) -> None:
-        """Save transactions to JSON file."""
         with open(TRANSACTIONS_FILE, "w") as f:
             json.dump([t.to_dict() for t in transactions], f, indent=2)
 
     def _append_transaction(self, transaction: Transaction) -> None:
-        """Append a single transaction to the log."""
         transactions = self._load_transactions()
         transactions.append(transaction)
         self._save_transactions(transactions)
+
+    # -------------------------------------------------------------------
+    # Cash balance
+    # -------------------------------------------------------------------
+
+    def get_cash(self) -> float:
+        """Get current cash balance."""
+        if not os.path.exists(CASH_FILE):
+            return 0.0
+        try:
+            with open(CASH_FILE, "r") as f:
+                data = json.load(f)
+            return data.get("balance", 0.0)
+        except (json.JSONDecodeError, KeyError):
+            return 0.0
+
+    def set_cash(self, amount: float) -> float:
+        """Set cash balance to a specific amount."""
+        with open(CASH_FILE, "w") as f:
+            json.dump({"balance": round(amount, 2), "last_updated": datetime.now().isoformat()}, f, indent=2)
+        return amount
+
+    def adjust_cash(self, delta: float) -> float:
+        """Adjust cash balance by a delta amount (positive = add, negative = deduct)."""
+        current = self.get_cash()
+        new_balance = current + delta
+        return self.set_cash(new_balance)
+
+    # -------------------------------------------------------------------
+    # Realized P&L
+    # -------------------------------------------------------------------
+
+    def get_realized_pnl(self) -> float:
+        """Calculate total realized P&L from all sell transactions."""
+        transactions = self._load_transactions()
+        return sum(t.realized_pnl for t in transactions if t.type == "sell")
 
     # -------------------------------------------------------------------
     # CRUD operations
@@ -79,6 +111,7 @@ class PortfolioManager:
         """
         Add a holding to the portfolio. If the ticker already exists,
         recalculate average cost with weighted average.
+        Deducts cost from cash balance.
         """
         ticker = ticker.upper()
         holdings = self._load_holdings()
@@ -86,7 +119,6 @@ class PortfolioManager:
         existing = next((h for h in holdings if h.ticker == ticker), None)
 
         if existing:
-            # Weighted average cost
             total_shares = existing.shares + shares
             total_cost = (existing.shares * existing.avg_cost) + (shares * avg_cost)
             existing.avg_cost = total_cost / total_shares
@@ -104,6 +136,9 @@ class PortfolioManager:
 
         self._save_holdings(holdings)
 
+        # Deduct from cash
+        self.adjust_cash(-(shares * avg_cost))
+
         # Record transaction
         self._append_transaction(Transaction(
             ticker=ticker,
@@ -115,22 +150,71 @@ class PortfolioManager:
 
         return result
 
+    def sell_shares(self, ticker: str, shares: float, sell_price: float) -> dict:
+        """
+        Sell shares of a holding. Calculates realized P&L.
+        If all shares sold, removes the holding.
+        Adds proceeds to cash balance.
+        Returns dict with details of the sale.
+        """
+        ticker = ticker.upper()
+        holdings = self._load_holdings()
+
+        existing = next((h for h in holdings if h.ticker == ticker), None)
+        if not existing:
+            raise ValueError(f"No holding found for {ticker}")
+
+        if shares > existing.shares:
+            raise ValueError(f"Cannot sell {shares} shares — only {existing.shares} held")
+
+        # Calculate realized P&L for this sell
+        avg_cost = existing.avg_cost
+        realized_pnl = (sell_price - avg_cost) * shares
+
+        # Update holding
+        existing.shares -= shares
+        if existing.shares <= 0.001:  # Effectively zero (floating point)
+            holdings = [h for h in holdings if h.ticker != ticker]
+        
+        self._save_holdings(holdings)
+
+        # Add proceeds to cash
+        proceeds = shares * sell_price
+        self.adjust_cash(proceeds)
+
+        # Log transaction
+        self._append_transaction(Transaction(
+            ticker=ticker,
+            type="sell",
+            shares=shares,
+            price=sell_price,
+            timestamp=datetime.now().isoformat(),
+            realized_pnl=realized_pnl,
+        ))
+
+        return {
+            "ticker": ticker,
+            "shares_sold": shares,
+            "sell_price": sell_price,
+            "proceeds": round(proceeds, 2),
+            "realized_pnl": round(realized_pnl, 2),
+            "remaining_shares": round(existing.shares, 4) if existing.shares > 0.001 else 0,
+        }
+
     def remove_holding(self, ticker: str) -> bool:
         """Remove a holding entirely from the portfolio."""
         ticker = ticker.upper()
         holdings = self._load_holdings()
 
         original_len = len(holdings)
-        # Get the holding before removing for transaction log
         removed = next((h for h in holdings if h.ticker == ticker), None)
         holdings = [h for h in holdings if h.ticker != ticker]
 
         if len(holdings) == original_len:
-            return False  # Not found
+            return False
 
         self._save_holdings(holdings)
 
-        # Record sell transaction (at current price if available, else avg_cost)
         if removed:
             try:
                 info = yf.Ticker(ticker).info
@@ -138,22 +222,25 @@ class PortfolioManager:
             except Exception:
                 price = removed.avg_cost
 
+            realized_pnl = (price - removed.avg_cost) * removed.shares
+            proceeds = removed.shares * price
+            self.adjust_cash(proceeds)
+
             self._append_transaction(Transaction(
                 ticker=ticker,
                 type="sell",
                 shares=removed.shares,
                 price=price,
                 timestamp=datetime.now().isoformat(),
+                realized_pnl=realized_pnl,
             ))
 
         return True
 
     def get_holdings(self) -> list[Holding]:
-        """Get raw holdings without live prices."""
         return self._load_holdings()
 
     def get_transactions(self) -> list[dict]:
-        """Get all transactions as dicts, newest first."""
         transactions = self._load_transactions()
         return [t.to_dict() for t in reversed(transactions)]
 
@@ -167,7 +254,6 @@ class PortfolioManager:
         if not holdings:
             return []
 
-        # Batch fetch all tickers at once for efficiency
         tickers_str = " ".join(h.ticker for h in holdings)
         enriched = []
 
@@ -220,32 +306,40 @@ class PortfolioManager:
         return enriched
 
     def get_portfolio_summary(self) -> PortfolioSummary:
-        """Calculate full portfolio summary with sector allocation."""
+        """Calculate full portfolio summary with sector allocation, cash, and realized P&L."""
         enriched = self.get_enriched_holdings()
+        cash = self.get_cash()
+        realized_pnl = self.get_realized_pnl()
 
         if not enriched:
-            return PortfolioSummary(last_updated=datetime.now().isoformat())
+            return PortfolioSummary(
+                cash_balance=cash,
+                total_value=cash,
+                realized_pnl=realized_pnl,
+                last_updated=datetime.now().isoformat(),
+            )
 
-        total_value = sum(h.market_value for h in enriched)
+        holdings_value = sum(h.market_value for h in enriched)
         total_cost = sum(h.total_cost for h in enriched)
-        total_pnl = total_value - total_cost
-        total_pnl_pct = (total_pnl / total_cost * 100) if total_cost > 0 else 0.0
+        unrealized_pnl = holdings_value - total_cost
+        unrealized_pnl_pct = (unrealized_pnl / total_cost * 100) if total_cost > 0 else 0.0
 
-        # Sector allocation
+        total_value = holdings_value + cash
+
+        # Sector allocation (of holdings only, not cash)
         sector_allocation = {}
         for h in enriched:
             if h.sector not in sector_allocation:
                 sector_allocation[h.sector] = 0.0
             sector_allocation[h.sector] += h.market_value
 
-        # Convert to percentages
-        if total_value > 0:
+        if holdings_value > 0:
             sector_allocation = {
-                k: round(v / total_value * 100, 2)
+                k: round(v / holdings_value * 100, 2)
                 for k, v in sector_allocation.items()
             }
 
-        # Weight per holding
+        # Weight per holding (of total portfolio including cash)
         holdings_with_weight = []
         for h in enriched:
             d = h.to_dict()
@@ -255,8 +349,11 @@ class PortfolioManager:
         return PortfolioSummary(
             total_value=total_value,
             total_cost=total_cost,
-            total_pnl=total_pnl,
-            total_pnl_pct=total_pnl_pct,
+            total_pnl=unrealized_pnl,
+            total_pnl_pct=unrealized_pnl_pct,
+            realized_pnl=realized_pnl,
+            cash_balance=cash,
+            holdings_value=holdings_value,
             holdings=holdings_with_weight,
             sector_allocation=sector_allocation,
             last_updated=datetime.now().isoformat(),

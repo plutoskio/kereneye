@@ -1,12 +1,14 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  TrendingUp, TrendingDown, Plus, Trash2, RefreshCw, Activity,
-  LayoutDashboard, Newspaper, Clock, ExternalLink
+  TrendingUp, TrendingDown, Plus, RefreshCw, Activity, DollarSign,
+  LayoutDashboard, Newspaper, Clock, ExternalLink, Wallet
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, LineChart, Line, XAxis, YAxis } from 'recharts';
 import AddHoldingModal from '../components/AddHoldingModal';
+import SellModal from '../components/SellModal';
+import CashModal from '../components/CashModal';
 import PerformanceCards from '../components/PerformanceCards';
 import MarketStatusBar from '../components/MarketStatusBar';
 import Background3D from '../Background3D';
@@ -30,6 +32,8 @@ export default function PortfolioDashboard() {
   const [loadingPerf, setLoadingPerf] = useState(false);
   const [lastUpdated, setLastUpdated] = useState(null);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [showSellModal, setShowSellModal] = useState(null); // holds the holding to sell
+  const [showCashModal, setShowCashModal] = useState(false);
   const [marketData, setMarketData] = useState(null);
 
   // Daily Market Brief state
@@ -231,13 +235,37 @@ export default function PortfolioDashboard() {
     }
   };
 
-  const handleRemoveHolding = async (ticker) => {
-    if (!confirm(`Remove ${ticker} from portfolio?`)) return;
+  const handleSellHolding = async (ticker, shares, price) => {
     try {
-      const res = await fetch(`${API}/api/portfolio/holdings/${ticker}`, { method: 'DELETE' });
-      if (res.ok) fetchHoldings();
+      const res = await fetch(`${API}/api/portfolio/holdings/${ticker}/sell`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ shares, price }),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.detail || 'Failed to sell');
+      }
+      setShowSellModal(null);
+      fetchHoldings();
     } catch (err) {
-      console.error('Failed to remove holding:', err);
+      throw err;
+    }
+  };
+
+  const handleSetCash = async (amount) => {
+    try {
+      const res = await fetch(`${API}/api/portfolio/cash`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ amount }),
+      });
+      if (res.ok) {
+        setShowCashModal(false);
+        fetchHoldings();
+      }
+    } catch (err) {
+      console.error('Failed to set cash:', err);
     }
   };
 
@@ -353,12 +381,32 @@ export default function PortfolioDashboard() {
               <h2 className="text-[40px] leading-tight font-mono font-medium text-altruistDark tabular-nums">
                 {formatCurrency(summary?.total_value)}
               </h2>
-              <div className="flex items-center gap-4 mt-1">
+              <div className="flex items-center gap-4 mt-1 flex-wrap">
+                {/* Unrealized P&L */}
                 <span className={`flex items-center gap-1 text-[14px] font-bold ${(summary?.total_pnl || 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                   {(summary?.total_pnl || 0) >= 0 ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
                   {formatCurrency(Math.abs(summary?.total_pnl || 0))}
                   <span className="text-[12px] ml-1">({(summary?.total_pnl_pct || 0).toFixed(2)}%)</span>
+                  <span className="text-[10px] text-altruistGray-400 font-medium uppercase tracking-widest ml-1">unrealized</span>
                 </span>
+                {/* Realized P&L */}
+                {(summary?.realized_pnl || 0) !== 0 && (
+                  <span className={`flex items-center gap-1 text-[13px] font-bold ${(summary?.realized_pnl || 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                    <DollarSign className="w-3.5 h-3.5" />
+                    {(summary?.realized_pnl || 0) >= 0 ? '+' : ''}{formatCurrency(summary?.realized_pnl || 0)}
+                    <span className="text-[10px] text-altruistGray-400 font-medium uppercase tracking-widest ml-1">realized</span>
+                  </span>
+                )}
+                {/* Cash */}
+                <button
+                  onClick={() => setShowCashModal(true)}
+                  className="flex items-center gap-1 text-[13px] font-bold text-altruistGray-600 hover:text-altruistBlue transition-colors cursor-pointer"
+                  title="Click to edit cash balance"
+                >
+                  <Wallet className="w-3.5 h-3.5" />
+                  {formatCurrency(summary?.cash_balance || 0)}
+                  <span className="text-[10px] text-altruistGray-400 font-medium uppercase tracking-widest ml-1">cash</span>
+                </button>
               </div>
             </div>
             <div className="flex items-center gap-3">
@@ -420,11 +468,11 @@ export default function PortfolioDashboard() {
                           <td className="px-4 py-4 text-right font-mono tabular-nums text-altruistGray-500">{h.weight_pct?.toFixed(1)}%</td>
                           <td className="px-6 py-4 text-right">
                             <button
-                              onClick={(e) => { e.stopPropagation(); handleRemoveHolding(h.ticker); }}
-                              className="text-altruistGray-300 hover:text-red-500 transition-colors"
-                              title="Remove holding"
+                              onClick={(e) => { e.stopPropagation(); setShowSellModal(h); }}
+                              className="text-[10px] font-bold text-red-500 uppercase tracking-widest hover:text-red-700 hover:bg-red-50 px-2 py-1 rounded-sm transition-colors"
+                              title="Sell shares"
                             >
-                              <Trash2 className="w-4 h-4" />
+                              Sell
                             </button>
                           </td>
                         </tr>
@@ -623,11 +671,25 @@ export default function PortfolioDashboard() {
         </div>
       )}
 
-      {/* ADD HOLDING MODAL */}
+      {/* MODALS */}
       {showAddModal && (
         <AddHoldingModal
           onClose={() => setShowAddModal(false)}
           onAdd={handleAddHolding}
+        />
+      )}
+      {showSellModal && (
+        <SellModal
+          holding={showSellModal}
+          onClose={() => setShowSellModal(null)}
+          onSell={handleSellHolding}
+        />
+      )}
+      {showCashModal && (
+        <CashModal
+          currentCash={summary?.cash_balance || 0}
+          onClose={() => setShowCashModal(false)}
+          onSave={handleSetCash}
         />
       )}
     </div>

@@ -45,19 +45,23 @@ class Transaction:
     shares: float
     price: float
     timestamp: str = ""  # ISO format string
+    realized_pnl: float = 0.0  # P&L on this transaction (sell only)
 
     @property
     def total_value(self) -> float:
         return self.shares * self.price
 
     def to_dict(self) -> dict:
-        return {
+        d = {
             "ticker": self.ticker,
             "type": self.type,
             "shares": self.shares,
             "price": self.price,
             "timestamp": self.timestamp,
         }
+        if self.type == "sell":
+            d["realized_pnl"] = round(self.realized_pnl, 2)
+        return d
 
     @classmethod
     def from_dict(cls, d: dict) -> "Transaction":
@@ -67,6 +71,7 @@ class Transaction:
             shares=d["shares"],
             price=d["price"],
             timestamp=d.get("timestamp", ""),
+            realized_pnl=d.get("realized_pnl", 0.0),
         )
 
 
@@ -117,13 +122,16 @@ class EnrichedHolding:
 
 @dataclass
 class PortfolioSummary:
-    """Aggregate portfolio summary with P&L and allocation."""
-    total_value: float = 0.0
+    """Aggregate portfolio summary with P&L, allocation, and cash."""
+    total_value: float = 0.0        # Holdings market value + cash
     total_cost: float = 0.0
-    total_pnl: float = 0.0
+    total_pnl: float = 0.0          # Unrealized P&L
     total_pnl_pct: float = 0.0
+    realized_pnl: float = 0.0       # Realized P&L from sells
+    cash_balance: float = 0.0
+    holdings_value: float = 0.0     # Market value of holdings only
     holdings: list[dict] = field(default_factory=list)
-    sector_allocation: dict = field(default_factory=dict)  # {sector: pct}
+    sector_allocation: dict = field(default_factory=dict)
     last_updated: str = ""
 
     def to_dict(self) -> dict:
@@ -132,6 +140,9 @@ class PortfolioSummary:
             "total_cost": round(self.total_cost, 2),
             "total_pnl": round(self.total_pnl, 2),
             "total_pnl_pct": round(self.total_pnl_pct, 2),
+            "realized_pnl": round(self.realized_pnl, 2),
+            "cash_balance": round(self.cash_balance, 2),
+            "holdings_value": round(self.holdings_value, 2),
             "holdings_count": len(self.holdings),
             "holdings": self.holdings,
             "sector_allocation": self.sector_allocation,

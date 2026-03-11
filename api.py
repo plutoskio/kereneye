@@ -413,6 +413,15 @@ class AddHoldingRequest(BaseModel):
     avg_cost: float
 
 
+class SellRequest(BaseModel):
+    shares: float
+    price: float
+
+
+class CashRequest(BaseModel):
+    amount: float
+
+
 @app.get("/api/portfolio/holdings")
 async def get_portfolio_holdings():
     """Get all holdings with current prices and P&L."""
@@ -428,7 +437,7 @@ async def get_portfolio_holdings():
 
 @app.post("/api/portfolio/holdings")
 async def add_portfolio_holding(req: AddHoldingRequest):
-    """Add a new holding (or increase existing position)."""
+    """Add a new holding (or increase existing position). Deducts from cash."""
     ticker = req.ticker.upper()
 
     # Validate that the ticker exists
@@ -455,14 +464,40 @@ async def add_portfolio_holding(req: AddHoldingRequest):
     return {"message": f"Added {req.shares} shares of {ticker}", "holding": holding.to_dict()}
 
 
+@app.post("/api/portfolio/holdings/{ticker}/sell")
+async def sell_portfolio_holding(ticker: str, req: SellRequest):
+    """Sell shares of a holding. Adds proceeds to cash. Calculates realized P&L."""
+    ticker = ticker.upper()
+    try:
+        result = _portfolio_manager.sell_shares(ticker, req.shares, req.price)
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.delete("/api/portfolio/holdings/{ticker}")
 async def remove_portfolio_holding(ticker: str):
-    """Remove a holding from the portfolio."""
+    """Remove a holding entirely from the portfolio."""
     ticker = ticker.upper()
     success = await asyncer.asyncify(_portfolio_manager.remove_holding)(ticker)
     if not success:
         raise HTTPException(status_code=404, detail=f"Holding '{ticker}' not found in portfolio.")
     return {"message": f"Removed {ticker} from portfolio"}
+
+
+@app.get("/api/portfolio/cash")
+async def get_cash_balance():
+    """Get current cash balance."""
+    return {"cash_balance": _portfolio_manager.get_cash()}
+
+
+@app.post("/api/portfolio/cash")
+async def set_cash_balance(req: CashRequest):
+    """Set cash balance to a specific amount."""
+    new_balance = _portfolio_manager.set_cash(req.amount)
+    return {"cash_balance": new_balance, "message": f"Cash balance set to ${new_balance:,.2f}"}
 
 
 @app.get("/api/portfolio/summary")

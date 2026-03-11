@@ -76,7 +76,8 @@ export default function TransactionHistory() {
                   <th className="text-left px-4 py-3 font-bold text-altruistGray-500 uppercase tracking-wider text-[11px]">Ticker</th>
                   <th className="text-right px-4 py-3 font-bold text-altruistGray-500 uppercase tracking-wider text-[11px]">Shares</th>
                   <th className="text-right px-4 py-3 font-bold text-altruistGray-500 uppercase tracking-wider text-[11px]">Price</th>
-                  <th className="text-right px-6 py-3 font-bold text-altruistGray-500 uppercase tracking-wider text-[11px]">Total</th>
+                  <th className="text-right px-4 py-3 font-bold text-altruistGray-500 uppercase tracking-wider text-[11px]">Total</th>
+                  <th className="text-right px-6 py-3 font-bold text-altruistGray-500 uppercase tracking-wider text-[11px]">P&L</th>
                 </tr>
               </thead>
               <tbody>
@@ -96,7 +97,16 @@ export default function TransactionHistory() {
                     <td className="px-4 py-4 font-mono font-bold text-altruistBlue">{t.ticker}</td>
                     <td className="px-4 py-4 text-right font-mono tabular-nums">{t.shares}</td>
                     <td className="px-4 py-4 text-right font-mono tabular-nums">${t.price?.toFixed(2)}</td>
-                    <td className="px-6 py-4 text-right font-mono tabular-nums font-bold">${(t.shares * t.price)?.toFixed(2)}</td>
+                    <td className="px-4 py-4 text-right font-mono tabular-nums font-bold">${(t.shares * t.price)?.toFixed(2)}</td>
+                    <td className="px-6 py-4 text-right font-mono tabular-nums font-bold">
+                      {t.type === 'sell' && t.realized_pnl !== undefined ? (
+                        <span className={t.realized_pnl >= 0 ? 'text-green-600' : 'text-red-600'}>
+                          {t.realized_pnl >= 0 ? '+' : ''}${t.realized_pnl?.toFixed(2)}
+                        </span>
+                      ) : (
+                        <span className="text-altruistGray-300">—</span>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>
