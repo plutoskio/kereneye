@@ -251,13 +251,13 @@ export default function PortfolioDashboard() {
     }
   };
 
-  const handleSetCash = async (amount, date) => {
+  const handleSetCash = async (amount, date, action) => {
     try {
-      await setPortfolioCash({ amount, date });
+      await setPortfolioCash({ amount, date, action });
       setShowCashModal(false);
       fetchHoldings();
     } catch (err) {
-      console.error('Failed to set cash:', err);
+      console.error('Failed to update cash:', err);
     }
   };
 
@@ -395,7 +395,7 @@ export default function PortfolioDashboard() {
                 <button
                   onClick={() => setShowCashModal(true)}
                   className="flex items-center gap-1 text-[13px] font-bold text-altruistGray-600 hover:text-altruistBlue transition-colors cursor-pointer"
-                  title="Click to edit cash balance"
+                  title="Manage cash deposits, withdrawals, and snapshots"
                 >
                   <Wallet className="w-3.5 h-3.5" />
                   {formatCurrency(summary?.cash_balance || 0)}

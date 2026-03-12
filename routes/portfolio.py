@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+from typing import Literal
 
 import asyncer
 import pytz
@@ -37,6 +38,7 @@ class SellRequest(BaseModel):
 class CashRequest(BaseModel):
     amount: float
     date: str | None = None
+    action: Literal["snapshot", "deposit", "withdraw"] = "snapshot"
 
 
 def _fetch_holdings_news(holdings) -> list[dict]:
@@ -219,10 +221,19 @@ async def get_cash_balance():
 
 @router.post("/cash")
 async def set_cash_balance(req: CashRequest):
-    """Set cash balance to a specific amount."""
+    """Apply a cash snapshot, deposit, or withdrawal."""
     try:
-        new_balance = portfolio_manager.set_cash(req.amount, req.date)
-        return {"cash_balance": new_balance, "message": f"Cash balance set to ${new_balance:,.2f}"}
+        if req.action == "deposit":
+            new_balance = portfolio_manager.deposit_cash(req.amount, req.date)
+            message = f"Recorded cash deposit of ${req.amount:,.2f}"
+        elif req.action == "withdraw":
+            new_balance = portfolio_manager.withdraw_cash(req.amount, req.date)
+            message = f"Recorded cash withdrawal of ${req.amount:,.2f}"
+        else:
+            new_balance = portfolio_manager.set_cash(req.amount, req.date)
+            message = f"Recorded cash snapshot of ${req.amount:,.2f}"
+
+        return {"cash_balance": new_balance, "message": message}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 

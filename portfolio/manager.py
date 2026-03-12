@@ -223,6 +223,44 @@ class PortfolioManager:
         self._save_transactions(transactions)
         return self._sync_cash_with_transactions(transactions, current_cash_offset)
 
+    def deposit_cash(self, amount: float, effective_at: str | None = None) -> float:
+        """Record an external cash deposit at the effective timestamp."""
+        if amount < 0:
+            raise ValueError("Deposit amount cannot be negative.")
+        if amount == 0:
+            return self.get_cash()
+
+        transactions = self._load_transactions()
+        current_cash_offset = self._current_cash_offset(transactions)
+        transactions.append(
+            Transaction(
+                type="cash_deposit",
+                amount=round(amount, 2),
+                timestamp=self._normalize_effective_timestamp(effective_at),
+            )
+        )
+        self._save_transactions(transactions)
+        return self._sync_cash_with_transactions(transactions, current_cash_offset)
+
+    def withdraw_cash(self, amount: float, effective_at: str | None = None) -> float:
+        """Record an external cash withdrawal at the effective timestamp."""
+        if amount < 0:
+            raise ValueError("Withdrawal amount cannot be negative.")
+        if amount == 0:
+            return self.get_cash()
+
+        transactions = self._load_transactions()
+        current_cash_offset = self._current_cash_offset(transactions)
+        transactions.append(
+            Transaction(
+                type="cash_withdrawal",
+                amount=round(amount, 2),
+                timestamp=self._normalize_effective_timestamp(effective_at),
+            )
+        )
+        self._save_transactions(transactions)
+        return self._sync_cash_with_transactions(transactions, current_cash_offset)
+
     # -------------------------------------------------------------------
     # Realized P&L
     # -------------------------------------------------------------------
