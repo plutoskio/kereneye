@@ -29,12 +29,18 @@ def calculate_portfolio_performance(
     # ---------------------------------------------------------------
     # 1. Determine date range from period
     # ---------------------------------------------------------------
+    today = datetime.now()
     period_map = {
         "1mo": 30, "3mo": 90, "6mo": 180,
         "1y": 365, "2y": 730, "5y": 1825,
     }
-    days = period_map.get(period, 365)
-    start_date = datetime.now() - timedelta(days=days)
+    if period == "ytd":
+        start_date = datetime(today.year, 1, 1)
+        download_kwargs = {"start": start_date.strftime("%Y-%m-%d")}
+    else:
+        days = period_map.get(period, 365)
+        start_date = today - timedelta(days=days)
+        download_kwargs = {"period": period}
 
     # ---------------------------------------------------------------
     # 2. Fetch price history for all holdings + S&P 500
@@ -43,7 +49,7 @@ def calculate_portfolio_performance(
     all_tickers = tickers + ["^GSPC"]
 
     try:
-        price_data = yf.download(all_tickers, period=period, progress=False)["Close"]
+        price_data = yf.download(all_tickers, progress=False, **download_kwargs)["Close"]
     except Exception as e:
         print(f"  ⚠ Failed to download price data: {e}")
         return _empty_performance()

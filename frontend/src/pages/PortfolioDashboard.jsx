@@ -12,8 +12,9 @@ import CashModal from '../components/CashModal';
 import PerformanceCards from '../components/PerformanceCards';
 import MarketStatusBar from '../components/MarketStatusBar';
 import Background3D from '../Background3D';
+import { API_BASE_URL } from '../config';
 
-const API = 'http://localhost:8000';
+const API = API_BASE_URL;
 
 const SECTOR_COLORS = [
   '#1565C0', '#0D47A1', '#2196F3', '#42A5F5', '#64B5F6',

@@ -107,6 +107,11 @@ class DataCollector:
         collector = DataCollector()
         data = collector.collect("AAPL")
     """
+    def collect(self, ticker_symbol: str) -> CompanyData:
+        """Fetch core and full data in one call for CLI and test helpers."""
+        data = self.collect_core_data(ticker_symbol)
+        return self.collect_full_data(data)
+
     def collect_core_data(self, ticker_symbol: str) -> CompanyData:
         """Collect ONLY the core data needed for initial UI rendering (charts, metrics)."""
         print(f"\n{'='*60}")

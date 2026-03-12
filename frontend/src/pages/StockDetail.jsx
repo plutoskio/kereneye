@@ -6,8 +6,9 @@ import {
   ArrowLeft, Search, ShieldAlert, TrendingUp, TrendingDown, Newspaper, Activity,
   Database, DollarSign, Scale, Users, Target, FileText, CheckCircle2, Loader2, RefreshCw, LayoutDashboard
 } from 'lucide-react';
+import { API_BASE_URL } from '../config';
 
-const API = 'http://localhost:8000';
+const API = API_BASE_URL;
 
 const REPORT_STEPS = [
   { id: "Collecting Data", label: "Data Collection", icon: Database },
@@ -23,7 +24,7 @@ const getStepState = (index, status) => {
   if (!status) return { isCompleted: false, isActive: index === 0, isPending: index > 0 };
   if (status === "Complete" || status === "Finalizing") return { isCompleted: true, isActive: false, isPending: false };
 
-  if (status === "Collecting Data") {
+  if (status === "Collecting Data" || status === "Collecting Full Data" || status.startsWith("Collecting")) {
     return { isCompleted: false, isActive: index === 0, isPending: index > 0 };
   }
   if (status.startsWith("Concurrent Analysis")) {

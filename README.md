@@ -302,6 +302,14 @@ All metrics are computed server-side using NumPy and Pandas. **Date-aware** — 
 4. **If not cached:** A "Generate Daily Brief" button is shown. Clicking it triggers `POST /api/market/brief`.
 5. **Agent synthesis:** The Chief Market Strategist agent produces a structured 4-section brief.
 
+### Flow 4: Portfolio News Impact Report
+
+1. **The dashboard loads holdings news** via `GET /api/portfolio/news`, aggregating recent headlines for each open position.
+2. **The user clicks "AI Impact Report"** to trigger `POST /api/portfolio/news/analyze`.
+3. **The backend builds a combined news digest** across the portfolio and passes it to a dedicated portfolio strategist agent.
+4. **The frontend polls `/api/portfolio/news/analyze/status`** while the agent is running.
+5. **The markdown report is rendered inline** above the holdings news feed.
+
 ---
 
 ## Caching & Refresh Logic
@@ -394,16 +402,25 @@ The report will be saved to `output/reports/` as a Markdown file.
 
 ```
 kereneye/
-├── api.py                         # FastAPI backend (REST endpoints + portfolio API)
+├── api.py                         # FastAPI app wiring + router registration
 ├── config.py                      # API keys & settings (loaded from .env)
 ├── main.py                        # CLI entry point
 ├── requirements.txt               # Python dependencies
 ├── .env.example                   # API key template
 │
+├── routes/
+│   ├── research.py                # Company data, executive dossier, and news-analysis routes
+│   ├── market.py                  # Daily brief and market overview routes
+│   └── portfolio.py               # Portfolio CRUD, performance, news, and market-status routes
+│
+├── services/
+│   ├── cache_service.py           # Shared file-cache helpers for reports, news, and briefs
+│   └── runtime_state.py           # Shared in-memory state for task progress and company cache
+│
 ├── data/
 │   └── collector.py               # Data engine (yfinance, Finnhub, FRED, Benzinga, Polygon, GDELT)
 │                                  #   → CompanyData, MarketBriefData dataclasses
-│                                  #   → collect_core_data(), collect_full_data()
+│                                  #   → collect(), collect_core_data(), collect_full_data()
 │                                  #   → Format helpers for agent context injection
 │
 ├── crew/
@@ -411,6 +428,7 @@ kereneye/
 │                                  #   → run_research_crew() (6-agent Executive Dossier)
 │                                  #   → run_news_analysis_crew() (1-agent News Analyst)
 │                                  #   → run_market_brief_crew() (1-agent Market Strategist)
+│                                  #   → run_portfolio_news_crew() (1-agent Portfolio Strategist)
 │
 ├── portfolio/                     # Portfolio tracker backend (NEW)
 │   ├── __init__.py
@@ -419,8 +437,7 @@ kereneye/
 │   └── analytics.py               # Sharpe, Beta, returns, benchmark comparison
 │
 ├── tools/
-│   ├── technical_tools.py         # RSI, MACD, MA, Bollinger, volatility computation
-│   └── chart_tools.py             # Price chart generation
+│   └── technical_tools.py         # RSI, MACD, MA, Bollinger, volatility computation
 │
 ├── cache/                         # Persistent storage (auto-created)
 │   ├── reports/                   #   → {TICKER}.json (30-day expiration)
@@ -467,19 +484,20 @@ kereneye/
 - Holdings news feed with **AI Impact Report** synthesis
 
 ### Executive Dossier (Per-Ticker)
-1. **Executive Summary** — Investment thesis + Buy/Hold/Sell recommendation
-2. **Company Overview** — Business description, key facts
-3. **Financial Analysis** — Revenue trends, margins, balance sheet, cash flow
-4. **Valuation Analysis** — Multiples, peer comparison, fair value
-5. **Technical Analysis** — Price trends, indicators, support/resistance
-6. **Market Sentiment** — News, analyst consensus, catalysts/risks
-7. **Industry & Competitive Analysis** — Moat, SWOT, industry dynamics
-8. **Risk Factors** — Consolidated risks
-9. **Investment Recommendation** — Final rating with confidence level
+1. **Executive Summary** — Thesis + Buy/Hold/Sell recommendation
+2. **The Bull & The Bear Case** — Explicit upside and downside scenarios
+3. **Structural & Technological Threats** — Moat decay, disruption, macro pressure
+4. **Financial & Valuation Analysis** — Financial trends plus peer- and multiple-based valuation
+5. **Technical Outlook** — Price structure, indicators, support/resistance
+6. **Investment Thesis Summary** — Final three-point conclusion
 
 ### News Analysis (Per-Ticker)
 - Filtered, recent (< 7 day) news from Benzinga and Polygon
 - Per-article impact explanation on the stock
+
+### Portfolio News Impact Report
+- Portfolio-wide synthesis of recent holding news
+- PM-style commentary on shared themes, risks, and catalysts across positions
 
 ### Daily Market Brief
 - Index performance (S&P 500, Nasdaq, FTSE, DAX, CAC, Nikkei)
