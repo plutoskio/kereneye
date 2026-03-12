@@ -50,6 +50,24 @@ def _build_inferred_transactions(
     return inferred
 
 
+def _replay_cash_from_zero(transactions: list[Transaction]) -> float:
+    cash = 0.0
+
+    for transaction in transactions:
+        if transaction.type == "buy":
+            cash -= transaction.shares * transaction.price
+        elif transaction.type == "sell":
+            cash += transaction.shares * transaction.price
+        elif transaction.type == "cash_deposit":
+            cash += transaction.amount
+        elif transaction.type == "cash_withdrawal":
+            cash -= transaction.amount
+        elif transaction.type == "cash_snapshot":
+            cash = transaction.amount
+
+    return float(cash)
+
+
 def calculate_portfolio_performance(
     enriched_holdings: list[EnrichedHolding],
     transactions: list[Transaction],
@@ -63,7 +81,7 @@ def calculate_portfolio_performance(
     capital does not appear as performance.
     """
 
-    if not enriched_holdings:
+    if not enriched_holdings and not transactions and cash_balance <= 0:
         return _empty_performance()
 
     # ---------------------------------------------------------------
@@ -126,7 +144,7 @@ def calculate_portfolio_performance(
         key=lambda tx: _parse_timestamp(tx.timestamp, start_date),
     )
 
-    initial_cash = float(cash_balance) - sum(tx.cash_delta for tx in sorted_transactions)
+    initial_cash = float(cash_balance) - _replay_cash_from_zero(sorted_transactions)
     cash = initial_cash
     positions = defaultdict(float)
     scheduled_transactions = defaultdict(list)
@@ -137,9 +155,16 @@ def calculate_portfolio_performance(
         if tx_date < first_visible_date:
             if transaction.type == "buy":
                 positions[transaction.ticker] += transaction.shares
+                cash -= transaction.shares * transaction.price
             elif transaction.type == "sell":
                 positions[transaction.ticker] -= transaction.shares
-            cash += transaction.cash_delta
+                cash += transaction.shares * transaction.price
+            elif transaction.type == "cash_deposit":
+                cash += transaction.amount
+            elif transaction.type == "cash_withdrawal":
+                cash -= transaction.amount
+            elif transaction.type == "cash_snapshot":
+                cash = transaction.amount
             continue
 
         market_date = _resolve_market_date(tx_date, market_index)
@@ -156,14 +181,22 @@ def calculate_portfolio_performance(
         for transaction in scheduled_transactions.get(date, []):
             if transaction.type == "buy":
                 positions[transaction.ticker] += transaction.shares
+                cash -= transaction.shares * transaction.price
             elif transaction.type == "sell":
                 positions[transaction.ticker] -= transaction.shares
                 if abs(positions[transaction.ticker]) <= 1e-9:
                     positions.pop(transaction.ticker, None)
-            elif transaction.type in {"cash_deposit", "cash_withdrawal"}:
-                day_external_flow += transaction.cash_delta
-
-            cash += transaction.cash_delta
+                cash += transaction.shares * transaction.price
+            elif transaction.type == "cash_deposit":
+                cash += transaction.amount
+                day_external_flow += transaction.amount
+            elif transaction.type == "cash_withdrawal":
+                cash -= transaction.amount
+                day_external_flow -= transaction.amount
+            elif transaction.type == "cash_snapshot":
+                snapshot_delta = transaction.amount - cash
+                cash = transaction.amount
+                day_external_flow += snapshot_delta
 
         holdings_value = 0.0
         for ticker, shares in positions.items():
@@ -315,8 +348,8 @@ def calculate_portfolio_performance(
             })
 
     return {
-        "total_return_pct": round(total_return_pct, 2),
-        "annualized_return_pct": round(annualized_return_pct, 2),
+        "total_return_pct": round(float(total_return_pct), 2),
+        "annualized_return_pct": round(float(annualized_return_pct), 2),
         "sharpe_ratio": sharpe,
         "beta": beta,
         "volatility_pct": round(float(volatility), 2),

@@ -182,8 +182,11 @@ async def add_portfolio_holding(req: AddHoldingRequest):
     except Exception as e:
         raise HTTPException(status_code=404, detail=f"Ticker '{ticker}' not found: {e}")
 
-    holding = portfolio_manager.add_holding(ticker, req.shares, req.avg_cost, req.date)
-    return {"message": f"Added {req.shares} shares of {ticker}", "holding": holding.to_dict()}
+    try:
+        holding = portfolio_manager.add_holding(ticker, req.shares, req.avg_cost, req.date)
+        return {"message": f"Added {req.shares} shares of {ticker}", "holding": holding.to_dict()}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.post("/holdings/{ticker}/sell")
@@ -217,8 +220,11 @@ async def get_cash_balance():
 @router.post("/cash")
 async def set_cash_balance(req: CashRequest):
     """Set cash balance to a specific amount."""
-    new_balance = portfolio_manager.set_cash(req.amount, req.date)
-    return {"cash_balance": new_balance, "message": f"Cash balance set to ${new_balance:,.2f}"}
+    try:
+        new_balance = portfolio_manager.set_cash(req.amount, req.date)
+        return {"cash_balance": new_balance, "message": f"Cash balance set to ${new_balance:,.2f}"}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.get("/summary")

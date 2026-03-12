@@ -29,7 +29,7 @@ export default function TransactionHistory() {
   };
 
   const isCashFlow = (transaction) =>
-    transaction.type === 'cash_deposit' || transaction.type === 'cash_withdrawal';
+    transaction.type === 'cash_deposit' || transaction.type === 'cash_withdrawal' || transaction.type === 'cash_snapshot';
 
   return (
     <div className="animate-fade-in-up">
@@ -86,14 +86,16 @@ export default function TransactionHistory() {
                       <span className={`inline-flex items-center gap-1 text-[11px] font-bold uppercase tracking-widest px-2.5 py-1 rounded-sm ${
                         t.type === 'buy' || t.type === 'cash_deposit'
                           ? 'bg-green-50 text-green-700 border border-green-200'
+                          : t.type === 'cash_snapshot'
+                            ? 'bg-blue-50 text-blue-700 border border-blue-200'
                           : t.type === 'sell'
                             ? 'bg-red-50 text-red-700 border border-red-200'
                             : 'bg-amber-50 text-amber-700 border border-amber-200'
                       }`}>
-                        {t.type === 'buy' || t.type === 'cash_deposit'
+                        {t.type === 'buy' || t.type === 'cash_deposit' || t.type === 'cash_snapshot'
                           ? <ArrowUpRight className="w-3 h-3" />
                           : <ArrowDownRight className="w-3 h-3" />}
-                        {t.type.replace('_', ' ')}
+                        {t.type === 'cash_snapshot' ? 'cash balance set' : t.type.replace('_', ' ')}
                       </span>
                     </td>
                     <td className="px-4 py-4 font-mono font-bold text-altruistBlue">{t.ticker || '—'}</td>
@@ -103,7 +105,7 @@ export default function TransactionHistory() {
                     </td>
                     <td className="px-4 py-4 text-right font-mono tabular-nums font-bold">
                       {isCashFlow(t)
-                        ? `${t.type === 'cash_withdrawal' ? '-' : '+'}$${t.amount?.toFixed(2)}`
+                        ? `${t.type === 'cash_withdrawal' ? '-' : ''}$${t.amount?.toFixed(2)}`
                         : `$${(t.shares * t.price)?.toFixed(2)}`}
                     </td>
                     <td className="px-6 py-4 text-right font-mono tabular-nums font-bold">

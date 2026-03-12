@@ -38,7 +38,7 @@ class Holding:
 @dataclass
 class Transaction:
     """A buy or sell transaction log entry."""
-    type: str  # "buy", "sell", "cash_deposit", "cash_withdrawal"
+    type: str  # "buy", "sell", "cash_deposit", "cash_withdrawal", "cash_snapshot"
     ticker: str = ""
     shares: float = 0.0
     price: float = 0.0
@@ -48,13 +48,13 @@ class Transaction:
 
     @property
     def total_value(self) -> float:
-        if self.type in {"cash_deposit", "cash_withdrawal"}:
+        if self.type in {"cash_deposit", "cash_withdrawal", "cash_snapshot"}:
             return self.amount
         return self.shares * self.price
 
     @property
     def is_cash_flow(self) -> bool:
-        return self.type in {"cash_deposit", "cash_withdrawal"}
+        return self.type in {"cash_deposit", "cash_withdrawal", "cash_snapshot"}
 
     @property
     def cash_delta(self) -> float:
@@ -66,6 +66,8 @@ class Transaction:
             return self.amount
         if self.type == "cash_withdrawal":
             return -self.amount
+        if self.type == "cash_snapshot":
+            return 0.0
         return 0.0
 
     def to_dict(self) -> dict:

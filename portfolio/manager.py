@@ -35,9 +35,15 @@ class PortfolioManager:
         if value:
             cleaned = value.strip()
             if len(cleaned) == 10:
-                return f"{cleaned}T00:00:00"
+                cleaned = f"{cleaned}T00:00:00"
+            datetime.fromisoformat(cleaned)
             return cleaned
         return datetime.now().isoformat()
+
+    @staticmethod
+    def _parse_effective_datetime(value: str | None) -> datetime:
+        normalized = PortfolioManager._normalize_effective_timestamp(value)
+        return datetime.fromisoformat(normalized)
 
     # -------------------------------------------------------------------
     # Persistence helpers
@@ -74,6 +80,10 @@ class PortfolioManager:
         transactions = self._load_transactions()
         transactions.append(transaction)
         self._save_transactions(transactions)
+
+    def _sorted_transactions(self) -> list[Transaction]:
+        transactions = self._load_transactions()
+        return sorted(transactions, key=lambda tx: self._parse_effective_datetime(tx.timestamp))
 
     def _migrate_legacy_transactions(self, transactions: list[Transaction]) -> list[Transaction]:
         """
@@ -118,6 +128,66 @@ class PortfolioManager:
         )
         return rounded_amount
 
+    def _replay_cash_from_zero(
+        self,
+        transactions: list[Transaction],
+        stop_at: datetime | None = None,
+    ) -> float:
+        cash = 0.0
+
+        for transaction in sorted(transactions, key=lambda tx: self._parse_effective_datetime(tx.timestamp)):
+            tx_time = self._parse_effective_datetime(transaction.timestamp)
+            if stop_at is not None and tx_time > stop_at:
+                break
+
+            if transaction.type == "buy":
+                cash -= transaction.shares * transaction.price
+            elif transaction.type == "sell":
+                cash += transaction.shares * transaction.price
+            elif transaction.type == "cash_deposit":
+                cash += transaction.amount
+            elif transaction.type == "cash_withdrawal":
+                cash -= transaction.amount
+            elif transaction.type == "cash_snapshot":
+                cash = transaction.amount
+
+        return round(cash, 2)
+
+    def _current_cash_offset(self, transactions: list[Transaction] | None = None) -> float:
+        transactions = self._load_transactions() if transactions is None else transactions
+        return round(self.get_cash() - self._replay_cash_from_zero(transactions), 2)
+
+    def _sync_cash_with_transactions(
+        self,
+        transactions: list[Transaction],
+        current_cash_offset: float | None = None,
+    ) -> float:
+        offset = self._current_cash_offset(transactions) if current_cash_offset is None else current_cash_offset
+        return self._write_cash_balance(offset + self._replay_cash_from_zero(transactions))
+
+    def _get_cash_balance_at(self, effective_at: str | None) -> float:
+        target = self._parse_effective_datetime(effective_at)
+        transactions = self._load_transactions()
+        offset = self._current_cash_offset(transactions)
+        return round(offset + self._replay_cash_from_zero(transactions, stop_at=target), 2)
+
+    def _get_shares_held_at(self, ticker: str, effective_at: str | None) -> float:
+        target = self._parse_effective_datetime(effective_at)
+        shares_held = 0.0
+
+        for transaction in self._sorted_transactions():
+            if transaction.ticker != ticker:
+                continue
+            if self._parse_effective_datetime(transaction.timestamp) > target:
+                break
+
+            if transaction.type == "buy":
+                shares_held += transaction.shares
+            elif transaction.type == "sell":
+                shares_held -= transaction.shares
+
+        return round(shares_held, 8)
+
     # -------------------------------------------------------------------
     # Cash balance
     # -------------------------------------------------------------------
@@ -134,27 +204,24 @@ class PortfolioManager:
             return 0.0
 
     def set_cash(self, amount: float, effective_at: str | None = None) -> float:
-        """Set cash balance to a specific amount and log the external cash flow delta."""
-        current = self.get_cash()
-        new_balance = self._write_cash_balance(amount)
-        delta = round(new_balance - current, 2)
+        """
+        Set the account cash balance at the effective timestamp using a ledger
+        snapshot, so backfilled edits can coexist with later cash edits.
+        """
+        if amount < 0:
+            raise ValueError("Cash balance cannot be negative.")
 
-        if abs(delta) > 1e-9:
-            self._append_transaction(
-                Transaction(
-                    type="cash_deposit" if delta > 0 else "cash_withdrawal",
-                    amount=abs(delta),
-                    timestamp=self._normalize_effective_timestamp(effective_at),
-                )
+        transactions = self._load_transactions()
+        current_cash_offset = self._current_cash_offset(transactions)
+        transactions.append(
+            Transaction(
+                type="cash_snapshot",
+                amount=round(amount, 2),
+                timestamp=self._normalize_effective_timestamp(effective_at),
             )
-
-        return new_balance
-
-    def adjust_cash(self, delta: float) -> float:
-        """Adjust cash balance by a delta amount (positive = add, negative = deduct)."""
-        current = self.get_cash()
-        new_balance = current + delta
-        return self._write_cash_balance(new_balance)
+        )
+        self._save_transactions(transactions)
+        return self._sync_cash_with_transactions(transactions, current_cash_offset)
 
     # -------------------------------------------------------------------
     # Realized P&L
@@ -181,6 +248,8 @@ class PortfolioManager:
         existing = next((h for h in holdings if h.ticker == ticker), None)
         effective_date = date_added or datetime.now().date().isoformat()
         effective_timestamp = self._normalize_effective_timestamp(effective_date)
+        transactions = self._load_transactions()
+        current_cash_offset = self._current_cash_offset(transactions)
 
         if existing:
             total_shares = existing.shares + shares
@@ -201,18 +270,17 @@ class PortfolioManager:
             result = new_holding
 
         self._save_holdings(holdings)
-
-        # Deduct from cash
-        self.adjust_cash(-(shares * avg_cost))
-
-        # Record transaction
-        self._append_transaction(Transaction(
-            ticker=ticker,
-            type="buy",
-            shares=shares,
-            price=avg_cost,
-            timestamp=effective_timestamp,
-        ))
+        transactions.append(
+            Transaction(
+                ticker=ticker,
+                type="buy",
+                shares=shares,
+                price=avg_cost,
+                timestamp=effective_timestamp,
+            )
+        )
+        self._save_transactions(transactions)
+        self._sync_cash_with_transactions(transactions, current_cash_offset)
 
         return result
 
@@ -230,8 +298,18 @@ class PortfolioManager:
         if not existing:
             raise ValueError(f"No holding found for {ticker}")
 
+        effective_timestamp = self._normalize_effective_timestamp(effective_at)
+        transactions = self._load_transactions()
+        current_cash_offset = self._current_cash_offset(transactions)
+
         if shares > existing.shares:
             raise ValueError(f"Cannot sell {shares} shares — only {existing.shares} held")
+
+        historical_shares = self._get_shares_held_at(ticker, effective_timestamp)
+        if shares > historical_shares:
+            raise ValueError(
+                f"Cannot sell {shares} shares on {effective_at or 'that date'} — only {historical_shares} shares were held then"
+            )
 
         # Calculate realized P&L for this sell
         avg_cost = existing.avg_cost
@@ -243,20 +321,19 @@ class PortfolioManager:
             holdings = [h for h in holdings if h.ticker != ticker]
         
         self._save_holdings(holdings)
-
-        # Add proceeds to cash
         proceeds = shares * sell_price
-        self.adjust_cash(proceeds)
-
-        # Log transaction
-        self._append_transaction(Transaction(
-            ticker=ticker,
-            type="sell",
-            shares=shares,
-            price=sell_price,
-            timestamp=self._normalize_effective_timestamp(effective_at),
-            realized_pnl=realized_pnl,
-        ))
+        transactions.append(
+            Transaction(
+                ticker=ticker,
+                type="sell",
+                shares=shares,
+                price=sell_price,
+                timestamp=effective_timestamp,
+                realized_pnl=realized_pnl,
+            )
+        )
+        self._save_transactions(transactions)
+        self._sync_cash_with_transactions(transactions, current_cash_offset)
 
         return {
             "ticker": ticker,
@@ -268,39 +345,26 @@ class PortfolioManager:
         }
 
     def remove_holding(self, ticker: str) -> bool:
-        """Remove a holding entirely from the portfolio."""
+        """Remove a holding by selling all remaining shares at the current market price."""
         ticker = ticker.upper()
         holdings = self._load_holdings()
 
-        original_len = len(holdings)
         removed = next((h for h in holdings if h.ticker == ticker), None)
-        holdings = [h for h in holdings if h.ticker != ticker]
-
-        if len(holdings) == original_len:
+        if not removed:
             return False
 
-        self._save_holdings(holdings)
+        try:
+            info = get_ticker_info(ticker)
+            price = info.get("currentPrice", info.get("regularMarketPrice", removed.avg_cost))
+        except Exception:
+            price = removed.avg_cost
 
-        if removed:
-            try:
-                info = get_ticker_info(ticker)
-                price = info.get("currentPrice", info.get("regularMarketPrice", removed.avg_cost))
-            except Exception:
-                price = removed.avg_cost
-
-            realized_pnl = (price - removed.avg_cost) * removed.shares
-            proceeds = removed.shares * price
-            self.adjust_cash(proceeds)
-
-            self._append_transaction(Transaction(
-                ticker=ticker,
-                type="sell",
-                shares=removed.shares,
-                price=price,
-                timestamp=datetime.now().isoformat(),
-                realized_pnl=realized_pnl,
-            ))
-
+        self.sell_shares(
+            ticker,
+            removed.shares,
+            price,
+            datetime.now().date().isoformat(),
+        )
         return True
 
     def get_holdings(self) -> list[Holding]:
