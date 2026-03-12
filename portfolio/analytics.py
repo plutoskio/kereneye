@@ -32,6 +32,18 @@ def _resolve_market_date(tx_date: pd.Timestamp, market_index: pd.DatetimeIndex) 
     return market_index[position]
 
 
+def _get_portfolio_inception_date(
+    transactions: list[Transaction],
+    fallback: datetime,
+    market_index: pd.DatetimeIndex,
+) -> pd.Timestamp | None:
+    if not transactions:
+        return _resolve_market_date(pd.Timestamp(fallback.date()), market_index)
+
+    first_tx = min(_parse_timestamp(tx.timestamp, fallback) for tx in transactions)
+    return _resolve_market_date(first_tx, market_index)
+
+
 def _build_inferred_transactions(
     enriched_holdings: list[EnrichedHolding],
     fallback_date: datetime,
@@ -224,9 +236,12 @@ def calculate_portfolio_performance(
         return _empty_performance()
 
     first_active = portfolio_equity[active_mask].index[0]
-    portfolio_equity = portfolio_equity.loc[first_active:]
-    holdings_value = holdings_value.loc[first_active:]
-    external_flows = external_flows.loc[first_active:]
+    inception_date = _get_portfolio_inception_date(sorted_transactions, start_date, market_index)
+    history_start = max(first_active, inception_date) if inception_date is not None else first_active
+
+    portfolio_equity = portfolio_equity.loc[history_start:]
+    holdings_value = holdings_value.loc[history_start:]
+    external_flows = external_flows.loc[history_start:]
 
     previous_equity = portfolio_equity.shift(1)
     portfolio_returns = (portfolio_equity - previous_equity - external_flows) / previous_equity
@@ -238,7 +253,7 @@ def calculate_portfolio_performance(
     # ---------------------------------------------------------------
     benchmark_col = "^GSPC"
     if benchmark_col in price_data.columns:
-        benchmark_prices = price_data[benchmark_col].loc[first_active:]
+        benchmark_prices = price_data[benchmark_col].loc[history_start:]
         benchmark_returns = benchmark_prices.pct_change().dropna()
     else:
         benchmark_returns = pd.Series(dtype=float)
