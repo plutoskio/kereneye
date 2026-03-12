@@ -6,7 +6,6 @@ from datetime import timedelta
 
 import asyncer
 import requests
-import yfinance as yf
 from fastapi import APIRouter, HTTPException
 
 import config
@@ -18,6 +17,7 @@ from services.cache_service import (
     load_cached_analysis,
     save_analysis_cache,
 )
+from services.market_data_service import get_batch_ticker_info
 from services.runtime_state import brief_task_status
 
 
@@ -34,11 +34,10 @@ def _fetch_market_overview() -> dict:
         "Nikkei 225": "^N225",
     }
     result = {"indices": [], "news": []}
-
-    tickers = yf.Tickers(" ".join(indices.values()))
+    infos = get_batch_ticker_info(indices.values())
     for name, symbol in indices.items():
         try:
-            info = tickers.tickers[symbol].info
+            info = infos.get(symbol, {})
             if info:
                 current = info.get("regularMarketPrice", info.get("previousClose", 0))
                 prev = info.get("regularMarketPreviousClose", info.get("previousClose", 1))

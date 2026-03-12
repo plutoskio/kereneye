@@ -1,14 +1,21 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import ReactMarkdown from 'react-markdown';
 import {
-  ArrowLeft, Search, ShieldAlert, TrendingUp, TrendingDown, Newspaper, Activity,
+  ArrowLeft, ShieldAlert, TrendingUp, TrendingDown, Newspaper, Activity,
   Database, DollarSign, Scale, Users, Target, FileText, CheckCircle2, Loader2, RefreshCw, LayoutDashboard
 } from 'lucide-react';
-import { API_BASE_URL } from '../config';
-
-const API = API_BASE_URL;
+import {
+  generateNewsAnalysis as requestNewsAnalysisGeneration,
+  generateResearchReport as requestResearchReportGeneration,
+  getCompany,
+  getNewsAnalysis,
+  getNewsAnalysisStatus,
+  getResearchReport,
+  getResearchStatus,
+} from '../api/client';
+import usePollingStatus from '../hooks/usePollingStatus';
 
 const REPORT_STEPS = [
   { id: "Collecting Data", label: "Data Collection", icon: Database },
@@ -49,12 +56,32 @@ export default function StockDetail() {
 
   const [report, setReport] = useState(null);
   const [loadingReport, setLoadingReport] = useState(false);
-  const [reportStatus, setReportStatus] = useState('');
 
   const [newsAnalysis, setNewsAnalysis] = useState(null);
   const [loadingNews, setLoadingNews] = useState(false);
-  const [newsStatus, setNewsStatus] = useState('');
   const [newsCacheAge, setNewsCacheAge] = useState(0);
+
+  const fetchReportStatus = useCallback(() => {
+    if (!companyData?.ticker) return Promise.resolve('');
+    return getResearchStatus(companyData.ticker);
+  }, [companyData?.ticker]);
+
+  const fetchNewsStatus = useCallback(() => {
+    if (!companyData?.ticker) return Promise.resolve('');
+    return getNewsAnalysisStatus(companyData.ticker);
+  }, [companyData?.ticker]);
+
+  const reportStatus = usePollingStatus({
+    enabled: loadingReport && Boolean(companyData?.ticker),
+    fetchStatus: fetchReportStatus,
+    intervalMs: 1000,
+  });
+
+  const newsStatus = usePollingStatus({
+    enabled: loadingNews && Boolean(companyData?.ticker),
+    fetchStatus: fetchNewsStatus,
+    intervalMs: 1000,
+  });
 
   // ---------------------------------------------------------------
   // Fetch data on mount
@@ -65,48 +92,6 @@ export default function StockDetail() {
     }
   }, [routeTicker]);
 
-  // Report status polling
-  useEffect(() => {
-    let intervalId;
-    if (loadingReport && companyData?.ticker) {
-      const poll = async () => {
-        try {
-          const res = await fetch(`${API}/api/research/status/${companyData.ticker}`);
-          if (res.ok) {
-            const data = await res.json();
-            setReportStatus(data.status);
-          }
-        } catch (err) { /* ignore */ }
-      };
-      poll();
-      intervalId = setInterval(poll, 1000);
-    } else if (!loadingReport) {
-      setReportStatus('');
-    }
-    return () => clearInterval(intervalId);
-  }, [loadingReport, companyData]);
-
-  // News status polling
-  useEffect(() => {
-    let intervalId;
-    if (loadingNews && companyData?.ticker) {
-      const poll = async () => {
-        try {
-          const res = await fetch(`${API}/api/news_analysis/status/${companyData.ticker}`);
-          if (res.ok) {
-            const data = await res.json();
-            setNewsStatus(data.status);
-          }
-        } catch (err) { /* ignore */ }
-      };
-      poll();
-      intervalId = setInterval(poll, 1000);
-    } else if (!loadingNews) {
-      setNewsStatus('');
-    }
-    return () => clearInterval(intervalId);
-  }, [loadingNews, companyData]);
-
   // ---------------------------------------------------------------
   // API calls
   // ---------------------------------------------------------------
@@ -114,47 +99,33 @@ export default function StockDetail() {
     try {
       setLoadingInitial(true);
       setError(null);
-      const res = await fetch(`${API}/api/company/${symbol}`);
-      if (!res.ok) throw new Error('Company not found.');
-      const data = await res.json();
-      setCompanyData(data);
-      // Also check caches
-      fetchResearchCache(symbol);
-      fetchNewsCache(symbol);
+      setCompanyData(null);
+      setReport(null);
+      setNewsAnalysis(null);
+      setNewsCacheAge(0);
+
+      const [company, cachedReport, cachedNews] = await Promise.all([
+        getCompany(symbol),
+        getResearchReport(symbol),
+        getNewsAnalysis(symbol),
+      ]);
+
+      setCompanyData(company);
+      setReport(cachedReport?.report || null);
+      setNewsAnalysis(cachedNews?.news_analysis || null);
+      setNewsCacheAge(cachedNews?.age_days || 0);
     } catch (err) {
+      setCompanyData(null);
       setError(err.message);
     } finally {
       setLoadingInitial(false);
     }
   };
 
-  const fetchResearchCache = async (symbol) => {
-    try {
-      const res = await fetch(`${API}/api/research/${symbol}`);
-      if (res.ok) {
-        const data = await res.json();
-        setReport(data.report);
-      }
-    } catch (err) { console.error(err); }
-  };
-
-  const fetchNewsCache = async (symbol) => {
-    try {
-      const res = await fetch(`${API}/api/news_analysis/${symbol}`);
-      if (res.ok) {
-        const data = await res.json();
-        setNewsAnalysis(data.news_analysis);
-        setNewsCacheAge(data.age_days || 0);
-      }
-    } catch (err) { console.error(err); }
-  };
-
   const generateReport = async (symbol) => {
     try {
       setLoadingReport(true);
-      const res = await fetch(`${API}/api/research/${symbol}`, { method: 'POST' });
-      if (!res.ok) throw new Error('Failed to generate report.');
-      const data = await res.json();
+      const data = await requestResearchReportGeneration(symbol);
       setReport(data.report);
     } catch (err) {
       setError(err.message);
@@ -166,9 +137,7 @@ export default function StockDetail() {
   const generateNewsAnalysis = async (symbol) => {
     try {
       setLoadingNews(true);
-      const res = await fetch(`${API}/api/news_analysis/${symbol}`, { method: 'POST' });
-      if (!res.ok) throw new Error('Failed to generate news analysis.');
-      const data = await res.json();
+      const data = await requestNewsAnalysisGeneration(symbol);
       setNewsAnalysis(data.news_analysis);
       setNewsCacheAge(0);
     } catch (err) {

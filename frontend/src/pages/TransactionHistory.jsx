@@ -1,9 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, ArrowUpRight, ArrowDownRight, Clock } from 'lucide-react';
-import { API_BASE_URL } from '../config';
-
-const API = API_BASE_URL;
+import { getTransactions } from '../api/client';
 
 export default function TransactionHistory() {
   const navigate = useNavigate();
@@ -13,11 +11,7 @@ export default function TransactionHistory() {
   useEffect(() => {
     const fetchTransactions = async () => {
       try {
-        const res = await fetch(`${API}/api/portfolio/transactions`);
-        if (res.ok) {
-          const data = await res.json();
-          setTransactions(data.transactions || []);
-        }
+        setTransactions(await getTransactions());
       } catch (err) {
         console.error('Failed to fetch transactions:', err);
       } finally {

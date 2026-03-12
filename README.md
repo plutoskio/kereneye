@@ -415,10 +415,12 @@ kereneye/
 │
 ├── services/
 │   ├── cache_service.py           # Shared file-cache helpers for reports, news, and briefs
+│   ├── file_service.py            # Atomic JSON file writes for portfolio and cache persistence
+│   ├── market_data_service.py     # Shared yfinance wrapper with small in-memory TTL caches
 │   └── runtime_state.py           # Shared in-memory state for task progress and company cache
 │
 ├── data/
-│   └── collector.py               # Data engine (yfinance, Finnhub, FRED, Benzinga, Polygon, GDELT)
+│   └── collector.py               # Data engine (shared market-data service, Finnhub, FRED, Benzinga, Polygon, GDELT)
 │                                  #   → CompanyData, MarketBriefData dataclasses
 │                                  #   → collect(), collect_core_data(), collect_full_data()
 │                                  #   → Format helpers for agent context injection
@@ -433,7 +435,7 @@ kereneye/
 ├── portfolio/                     # Portfolio tracker backend (NEW)
 │   ├── __init__.py
 │   ├── models.py                  # Holding, Transaction, EnrichedHolding, PortfolioSummary
-│   ├── manager.py                 # CRUD + JSON persistence + yfinance live enrichment
+│   ├── manager.py                 # CRUD + atomic JSON persistence + live market enrichment
 │   └── analytics.py               # Sharpe, Beta, returns, benchmark comparison
 │
 ├── tools/

@@ -15,7 +15,6 @@ from typing import Optional
 
 import numpy as np
 import pandas as pd
-import yfinance as yf
 
 from config import (
     FINNHUB_API_KEY,
@@ -25,6 +24,13 @@ from config import (
     PRICE_HISTORY_PERIOD,
     BENZINGA_API_KEY,
     MASSIVE_API_KEY,
+)
+from services.market_data_service import (
+    get_batch_ticker_info,
+    get_price_history,
+    get_ticker,
+    get_ticker_info,
+    get_ticker_news,
 )
 
 import requests
@@ -180,10 +186,10 @@ class DataCollector:
             "Nikkei 225": "^N225"
         }
         try:
-            tickers = yf.Tickers(" ".join(index_map.values()))
+            index_infos = get_batch_ticker_info(index_map.values())
             for name, symbol in index_map.items():
                 try:
-                    info = tickers.tickers[symbol].info
+                    info = index_infos.get(symbol, {})
                     if info:
                         current = info.get("regularMarketPrice", info.get("previousClose", 0))
                         prev = info.get("regularMarketPreviousClose", info.get("previousClose", 1))
@@ -295,8 +301,8 @@ class DataCollector:
         print("📡 Fetching data from yfinance...")
 
         try:
-            ticker = yf.Ticker(data.ticker)
-            info = ticker.info or {}
+            ticker = get_ticker(data.ticker)
+            info = get_ticker_info(data.ticker)
         except Exception as e:
             data.errors.append(f"yfinance info failed: {e}")
             print(f"  ❌ Failed to fetch ticker info: {e}")
@@ -369,7 +375,7 @@ class DataCollector:
 
         # --- Price history ---
         try:
-            data.price_history = ticker.history(period=PRICE_HISTORY_PERIOD)
+            data.price_history = get_price_history(data.ticker, PRICE_HISTORY_PERIOD)
             if data.price_history is not None and not data.price_history.empty:
                 print(
                     f"  ✅ Price history: "
@@ -410,14 +416,27 @@ class DataCollector:
 
         # --- News ---
         try:
-            news_raw = ticker.news or []
+            news_raw = get_ticker_news(data.ticker, limit=10)
             data.news = []
             for item in news_raw[:10]:  # Limit to 10 articles
+                content = item.get("content", item)
+                provider = content.get("provider")
+                if isinstance(provider, dict):
+                    publisher = provider.get("displayName", "")
+                else:
+                    publisher = content.get("publisher", item.get("publisher", ""))
+
+                url_obj = content.get("clickThroughUrl") or content.get("canonicalUrl")
+                if isinstance(url_obj, dict):
+                    link = url_obj.get("url", "")
+                else:
+                    link = content.get("link", item.get("link", ""))
+
                 data.news.append({
-                    "title": item.get("title", ""),
-                    "publisher": item.get("publisher", ""),
-                    "link": item.get("link", ""),
-                    "published": item.get("providerPublishTime", ""),
+                    "title": content.get("title", item.get("title", "")),
+                    "publisher": publisher,
+                    "link": link,
+                    "published": content.get("providerPublishTime", item.get("providerPublishTime", "")),
                 })
             print(f"  ✅ News: {len(data.news)} articles")
         except Exception as e:
@@ -460,10 +479,10 @@ class DataCollector:
             return
 
         print(f"📡 Fetching peer ratios for {len(data.peer_tickers)} peers...")
+        peer_infos = get_batch_ticker_info(data.peer_tickers)
         for peer_symbol in data.peer_tickers:
             try:
-                peer_ticker = yf.Ticker(peer_symbol)
-                peer_info = peer_ticker.info or {}
+                peer_info = peer_infos.get(peer_symbol, {})
                 peer_data = {
                     "ticker": peer_symbol,
                     "name": peer_info.get(

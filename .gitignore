@@ -31,3 +31,4 @@ output/
 # macOS
 .DS_Store
 cache/portfolio/
+cache/news/

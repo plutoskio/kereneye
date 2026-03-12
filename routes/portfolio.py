@@ -6,12 +6,12 @@ from datetime import datetime, timedelta
 
 import asyncer
 import pytz
-import yfinance as yf
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from crew.research_crew import run_portfolio_news_crew
 from portfolio.analytics import calculate_portfolio_performance
+from services.market_data_service import get_batch_ticker_news, get_ticker_info
 from services.runtime_state import (
     portfolio_manager,
     portfolio_news_task_status,
@@ -39,13 +39,11 @@ class CashRequest(BaseModel):
 
 def _fetch_holdings_news(holdings) -> list[dict]:
     results = []
-    tickers_str = " ".join(h.ticker for h in holdings)
-    tickers_obj = yf.Tickers(tickers_str)
+    news_by_ticker = get_batch_ticker_news((holding.ticker for holding in holdings), limit=5)
 
     for holding in holdings:
         try:
-            ticker = tickers_obj.tickers[holding.ticker]
-            news_raw = ticker.news or []
+            news_raw = news_by_ticker.get(holding.ticker, [])
             news_items = []
             for item in news_raw[:5]:
                 content = item.get("content", item)
@@ -168,23 +166,14 @@ async def add_portfolio_holding(req: AddHoldingRequest):
     """Add a new holding or increase an existing position."""
     ticker = req.ticker.upper()
 
-    def _validate_ticker(symbol: str):
-        try:
-            info = yf.Ticker(symbol).info or {}
-            price = (
-                info.get("currentPrice")
-                or info.get("regularMarketPrice")
-                or info.get("previousClose")
-            )
-            if not price:
-                return None
-            return info
-        except Exception:
-            return None
-
     try:
-        info = await asyncer.asyncify(_validate_ticker)(ticker)
-        if info is None:
+        info = await asyncer.asyncify(get_ticker_info)(ticker)
+        price = (
+            info.get("currentPrice")
+            or info.get("regularMarketPrice")
+            or info.get("previousClose")
+        )
+        if not price:
             raise HTTPException(status_code=404, detail=f"Ticker '{ticker}' not found.")
     except HTTPException:
         raise
@@ -249,7 +238,8 @@ async def get_portfolio_performance(period: str = "1y"):
 
     try:
         enriched = await asyncer.asyncify(portfolio_manager.get_enriched_holdings)()
-        return await asyncer.asyncify(calculate_portfolio_performance)(enriched, period)
+        cash_balance = portfolio_manager.get_cash()
+        return await asyncer.asyncify(calculate_portfolio_performance)(enriched, period, cash_balance)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

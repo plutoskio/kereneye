@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { Suspense, lazy, useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   TrendingUp, TrendingDown, Plus, RefreshCw, Activity, DollarSign,
@@ -11,10 +11,24 @@ import SellModal from '../components/SellModal';
 import CashModal from '../components/CashModal';
 import PerformanceCards from '../components/PerformanceCards';
 import MarketStatusBar from '../components/MarketStatusBar';
-import Background3D from '../Background3D';
-import { API_BASE_URL } from '../config';
+import {
+  addPortfolioHolding,
+  generateMarketBrief as requestMarketBriefGeneration,
+  generatePortfolioNewsReport as requestPortfolioNewsReportGeneration,
+  getMarketBrief,
+  getMarketBriefStatus,
+  getMarketOverview,
+  getPortfolioMarketStatus,
+  getPortfolioNews,
+  getPortfolioNewsReportStatus,
+  getPortfolioPerformance,
+  getPortfolioSummary,
+  sellPortfolioHolding,
+  setPortfolioCash,
+} from '../api/client';
+import usePollingStatus from '../hooks/usePollingStatus';
 
-const API = API_BASE_URL;
+const Background3D = lazy(() => import('../Background3D'));
 
 const SECTOR_COLORS = [
   '#1565C0', '#0D47A1', '#2196F3', '#42A5F5', '#64B5F6',
@@ -40,7 +54,6 @@ export default function PortfolioDashboard() {
   // Daily Market Brief state
   const [marketBrief, setMarketBrief] = useState(null);
   const [loadingBrief, setLoadingBrief] = useState(false);
-  const [briefStatus, setBriefStatus] = useState('');
   const [briefCacheAge, setBriefCacheAge] = useState(0);
 
   // Holdings news
@@ -48,7 +61,6 @@ export default function PortfolioDashboard() {
   const [loadingNews, setLoadingNews] = useState(false);
   const [portfolioNewsReport, setPortfolioNewsReport] = useState(null);
   const [loadingNewsReport, setLoadingNewsReport] = useState(false);
-  const [newsReportStatus, setNewsReportStatus] = useState('');
 
   // Market status
   const [marketStatus, setMarketStatus] = useState(null);
@@ -56,19 +68,33 @@ export default function PortfolioDashboard() {
   // Time since last refresh
   const [secondsSinceUpdate, setSecondsSinceUpdate] = useState(0);
 
+  const pollMarketBriefStatus = useCallback(() => getMarketBriefStatus(), []);
+  const pollPortfolioNewsStatus = useCallback(() => getPortfolioNewsReportStatus(), []);
+
+  const briefStatus = usePollingStatus({
+    enabled: loadingBrief,
+    fetchStatus: pollMarketBriefStatus,
+    intervalMs: 2000,
+    initialStatus: 'Collecting Market Data',
+  });
+
+  const newsReportStatus = usePollingStatus({
+    enabled: loadingNewsReport,
+    fetchStatus: pollPortfolioNewsStatus,
+    intervalMs: 2000,
+    initialStatus: 'Fetching recent news...',
+  });
+
   // ---------------------------------------------------------------
   // Fetch helpers
   // ---------------------------------------------------------------
   const fetchHoldings = useCallback(async () => {
     try {
-      const res = await fetch(`${API}/api/portfolio/summary`);
-      if (res.ok) {
-        const data = await res.json();
-        setSummary(data);
-        setHoldings(data.holdings || []);
-        setLastUpdated(new Date());
-        setSecondsSinceUpdate(0);
-      }
+      const data = await getPortfolioSummary();
+      setSummary(data);
+      setHoldings(data.holdings || []);
+      setLastUpdated(new Date());
+      setSecondsSinceUpdate(0);
     } catch (err) {
       console.error('Failed to fetch holdings:', err);
     } finally {
@@ -79,11 +105,8 @@ export default function PortfolioDashboard() {
   const fetchPerformance = useCallback(async (period = perfPeriod) => {
     setLoadingPerf(true);
     try {
-      const res = await fetch(`${API}/api/portfolio/performance?period=${period}`);
-      if (res.ok) {
-        const data = await res.json();
-        setPerformance(data);
-      }
+      const data = await getPortfolioPerformance(period);
+      setPerformance(data);
     } catch (err) {
       console.error('Failed to fetch performance:', err);
     } finally {
@@ -93,11 +116,7 @@ export default function PortfolioDashboard() {
 
   const fetchMarketStatus = useCallback(async () => {
     try {
-      const res = await fetch(`${API}/api/portfolio/market-status`);
-      if (res.ok) {
-        const data = await res.json();
-        setMarketStatus(data.markets);
-      }
+      setMarketStatus(await getPortfolioMarketStatus());
     } catch (err) {
       console.error('Failed to fetch market status:', err);
     }
@@ -105,11 +124,7 @@ export default function PortfolioDashboard() {
 
   const fetchMarketOverview = useCallback(async () => {
     try {
-      const res = await fetch(`${API}/api/market/overview`);
-      if (res.ok) {
-        const data = await res.json();
-        setMarketData(data);
-      }
+      setMarketData(await getMarketOverview());
     } catch (err) {
       console.error('Failed to fetch market overview:', err);
     }
@@ -117,9 +132,8 @@ export default function PortfolioDashboard() {
 
   const fetchBriefCache = useCallback(async () => {
     try {
-      const res = await fetch(`${API}/api/market/brief`);
-      if (res.ok) {
-        const data = await res.json();
+      const data = await getMarketBrief();
+      if (data) {
         setMarketBrief(data.brief);
         setBriefCacheAge(data.age_hours || 0);
       }
@@ -129,14 +143,13 @@ export default function PortfolioDashboard() {
   }, []);
 
   const fetchHoldingsNews = useCallback(async () => {
-    if (holdings.length === 0) return;
+    if (holdings.length === 0) {
+      setHoldingsNews([]);
+      return;
+    }
     setLoadingNews(true);
     try {
-      const res = await fetch(`${API}/api/portfolio/news`);
-      if (res.ok) {
-        const data = await res.json();
-        setHoldingsNews(data.holdings_news || []);
-      }
+      setHoldingsNews(await getPortfolioNews());
     } catch (err) {
       console.error('Failed to fetch holdings news:', err);
     } finally {
@@ -147,25 +160,8 @@ export default function PortfolioDashboard() {
   const generateAiNewsReport = async () => {
     try {
       setLoadingNewsReport(true);
-      setNewsReportStatus('Fetching recent news...');
-
-      const statusInterval = setInterval(async () => {
-        try {
-          const statusRes = await fetch(`${API}/api/portfolio/news/analyze/status`);
-          if (statusRes.ok) {
-            const statusData = await statusRes.json();
-            setNewsReportStatus(statusData.status || '');
-          }
-        } catch (e) { /* ignore */ }
-      }, 2000);
-
-      const res = await fetch(`${API}/api/portfolio/news/analyze`, { method: 'POST' });
-      clearInterval(statusInterval);
-
-      if (!res.ok) throw new Error('Failed to generate AI news report');
-      const data = await res.json();
+      const data = await requestPortfolioNewsReportGeneration();
       setPortfolioNewsReport(data.report);
-      setNewsReportStatus('');
     } catch (e) {
       console.error(e);
       setPortfolioNewsReport('Failed to generate report. Please try again later.');
@@ -182,7 +178,7 @@ export default function PortfolioDashboard() {
     fetchMarketStatus();
     fetchMarketOverview();
     fetchBriefCache();
-  }, []);
+  }, [fetchBriefCache, fetchHoldings, fetchMarketOverview, fetchMarketStatus]);
 
   // Fetch performance when holdings change
   useEffect(() => {
@@ -190,7 +186,7 @@ export default function PortfolioDashboard() {
       fetchPerformance();
       fetchHoldingsNews();
     }
-  }, [holdings.length]);
+  }, [holdings.length, fetchHoldingsNews, fetchPerformance]);
 
   // ---------------------------------------------------------------
   // Auto-refresh holdings (30s market open, 5min closed)
@@ -221,23 +217,7 @@ export default function PortfolioDashboard() {
   const generateMarketBrief = async () => {
     try {
       setLoadingBrief(true);
-      setBriefStatus('Collecting Market Data');
-
-      const statusInterval = setInterval(async () => {
-        try {
-          const statusRes = await fetch(`${API}/api/market/brief/status`);
-          if (statusRes.ok) {
-            const statusData = await statusRes.json();
-            setBriefStatus(statusData.status || '');
-          }
-        } catch (e) { /* ignore */ }
-      }, 2000);
-
-      const res = await fetch(`${API}/api/market/brief`, { method: 'POST' });
-      clearInterval(statusInterval);
-
-      if (!res.ok) throw new Error('Failed to generate brief.');
-      const data = await res.json();
+      const data = await requestMarketBriefGeneration();
       setMarketBrief(data.brief);
       setBriefCacheAge(0);
     } catch (err) {
@@ -253,15 +233,7 @@ export default function PortfolioDashboard() {
   // ---------------------------------------------------------------
   const handleAddHolding = async (ticker, shares, avgCost, date) => {
     try {
-      const res = await fetch(`${API}/api/portfolio/holdings`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ticker, shares, avg_cost: avgCost, date }),
-      });
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.detail || 'Failed to add holding');
-      }
+      await addPortfolioHolding({ ticker, shares, avg_cost: avgCost, date });
       setShowAddModal(false);
       fetchHoldings();
     } catch (err) {
@@ -271,15 +243,7 @@ export default function PortfolioDashboard() {
 
   const handleSellHolding = async (ticker, shares, price) => {
     try {
-      const res = await fetch(`${API}/api/portfolio/holdings/${ticker}/sell`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ shares, price }),
-      });
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.detail || 'Failed to sell');
-      }
+      await sellPortfolioHolding(ticker, { shares, price });
       setShowSellModal(null);
       fetchHoldings();
     } catch (err) {
@@ -289,15 +253,9 @@ export default function PortfolioDashboard() {
 
   const handleSetCash = async (amount) => {
     try {
-      const res = await fetch(`${API}/api/portfolio/cash`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ amount }),
-      });
-      if (res.ok) {
-        setShowCashModal(false);
-        fetchHoldings();
-      }
+      await setPortfolioCash({ amount });
+      setShowCashModal(false);
+      fetchHoldings();
     } catch (err) {
       console.error('Failed to set cash:', err);
     }
@@ -344,7 +302,9 @@ export default function PortfolioDashboard() {
       {isEmpty ? (
         // EMPTY STATE — with 3D background
         <div className="relative h-[70vh] flex flex-col rounded-sm overflow-hidden bg-altruistWhite border border-altruistGray-200 shadow-sm">
-          <Background3D />
+          <Suspense fallback={<div className="absolute inset-0 bg-altruistGray-50" />}>
+            <Background3D />
+          </Suspense>
           <div className="relative z-10 flex-1 flex flex-col items-center justify-center p-12">
             <LayoutDashboard className="w-12 h-12 text-altruistBlue mb-6 opacity-60" />
             <h2 className="text-[24px] font-semibold text-altruistDark tracking-tight mb-2">Your Portfolio is Empty</h2>
@@ -519,13 +479,13 @@ export default function PortfolioDashboard() {
               {/* PERFORMANCE CARDS */}
               {performance && <PerformanceCards performance={performance} />}
 
-              {/* BENCHMARK CHART */}
+              {/* PERFORMANCE CHART */}
               {performance && performance.portfolio_history.length > 0 && (
                 <div className="panel-structured overflow-hidden">
                   <div className="border-b border-altruistGray-200 px-6 py-4 bg-altruistGray-50 flex justify-between items-center">
-                    <h3 className="text-[13px] font-bold text-altruistGray-800 uppercase tracking-wide">Portfolio vs S&P 500</h3>
+                    <h3 className="text-[13px] font-bold text-altruistGray-800 uppercase tracking-wide">Portfolio Performance vs S&P 500</h3>
                     <div className="flex items-center gap-2">
-                      {['1mo', '3mo', '6mo', '1y', '2y', '5y'].map((p) => (
+                      {['1mo', '3mo', '6mo', '1y', '2y', '5y', 'ytd'].map((p) => (
                         <button
                           key={p}
                           onClick={() => { setPerfPeriod(p); fetchPerformance(p); }}
@@ -552,12 +512,55 @@ export default function PortfolioDashboard() {
                           <YAxis hide domain={['auto', 'auto']} />
                           <Tooltip
                             contentStyle={{ backgroundColor: '#ffffff', border: '1px solid #E5E7EB', borderRadius: '4px', color: '#111827', fontFamily: 'monospace', fontSize: '12px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' }}
-                            formatter={(value) => [`$${value.toFixed(2)}`, '']}
+                            formatter={(value) => [`${value.toFixed(2)}%`, '']}
                           />
                           <Line data={performance.portfolio_history} type="monotone" dataKey="value" stroke="#1565C0" strokeWidth={2.5} dot={false} name="Portfolio" />
                           {performance.benchmark_history.length > 0 && (
                             <Line data={performance.benchmark_history} type="monotone" dataKey="value" stroke="#9CA3AF" strokeWidth={1.5} dot={false} strokeDasharray="5 5" name="S&P 500" />
                           )}
+                        </LineChart>
+                      </ResponsiveContainer>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* ABSOLUTE EQUITY CHART */}
+              {performance && performance.portfolio_value_history.length > 0 && (
+                <div className="panel-structured overflow-hidden">
+                  <div className="border-b border-altruistGray-200 px-6 py-4 bg-altruistGray-50 flex justify-between items-center">
+                    <h3 className="text-[13px] font-bold text-altruistGray-800 uppercase tracking-wide">Absolute Portfolio Equity</h3>
+                    <div className="flex items-center gap-2">
+                      {['1mo', '3mo', '6mo', '1y', '2y', '5y', 'ytd'].map((p) => (
+                        <button
+                          key={`value-${p}`}
+                          onClick={() => { setPerfPeriod(p); fetchPerformance(p); }}
+                          className={`text-[10px] font-bold uppercase tracking-widest px-2.5 py-1 rounded-sm transition-colors ${
+                            perfPeriod === p
+                              ? 'bg-altruistBlue text-white'
+                              : 'text-altruistGray-400 hover:text-altruistDark hover:bg-altruistGray-100'
+                          }`}
+                        >
+                          {p}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="p-6 h-[300px]">
+                    {loadingPerf ? (
+                      <div className="h-full flex items-center justify-center">
+                        <div className="w-10 h-10 rounded-full border-2 border-altruistBlue border-t-transparent animate-spin" />
+                      </div>
+                    ) : (
+                      <ResponsiveContainer width="100%" height="100%">
+                        <LineChart margin={{ top: 5, right: 0, bottom: 0, left: -20 }}>
+                          <XAxis dataKey="date" data={performance.portfolio_value_history} hide />
+                          <YAxis hide domain={['auto', 'auto']} />
+                          <Tooltip
+                            contentStyle={{ backgroundColor: '#ffffff', border: '1px solid #E5E7EB', borderRadius: '4px', color: '#111827', fontFamily: 'monospace', fontSize: '12px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' }}
+                            formatter={(value) => [`$${value.toFixed(2)}`, 'Portfolio Equity']}
+                          />
+                          <Line data={performance.portfolio_value_history} type="monotone" dataKey="value" stroke="#0D47A1" strokeWidth={2.5} dot={false} name="Portfolio Equity" />
                         </LineChart>
                       </ResponsiveContainer>
                     )}

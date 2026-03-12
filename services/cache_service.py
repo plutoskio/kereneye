@@ -6,6 +6,8 @@ import json
 import os
 from datetime import datetime, timedelta
 
+from services.file_service import write_json_atomic
+
 
 BASE_DIR = os.path.dirname(os.path.dirname(__file__))
 CACHE_DIR = os.path.join(BASE_DIR, "cache")
@@ -48,11 +50,10 @@ def load_cached_analysis(cache_file: str, max_age: timedelta) -> tuple[str | Non
 
 def save_analysis_cache(cache_file: str, analysis: str) -> None:
     """Persist analysis content with a fresh timestamp."""
-    with open(cache_file, "w") as f:
-        json.dump(
-            {
-                "timestamp": datetime.now().isoformat(),
-                "analysis": analysis,
-            },
-            f,
-        )
+    write_json_atomic(
+        cache_file,
+        {
+            "timestamp": datetime.now().isoformat(),
+            "analysis": analysis,
+        },
+    )

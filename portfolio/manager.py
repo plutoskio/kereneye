@@ -2,15 +2,15 @@
 Portfolio Manager — CRUD operations with JSON file persistence.
 
 Manages holdings, transactions, and cash balance, persisted to cache/portfolio/.
-Fetches live prices via yfinance for real-time P&L calculations.
+Fetches live prices via the shared market data service for real-time P&L calculations.
 """
 
 import json
 import os
 from datetime import datetime
-from typing import Optional
 
-import yfinance as yf
+from services.file_service import write_json_atomic
+from services.market_data_service import get_batch_ticker_info, get_ticker_info
 
 from .models import Holding, Transaction, EnrichedHolding, PortfolioSummary
 
@@ -45,8 +45,7 @@ class PortfolioManager:
             return []
 
     def _save_holdings(self, holdings: list[Holding]) -> None:
-        with open(HOLDINGS_FILE, "w") as f:
-            json.dump([h.to_dict() for h in holdings], f, indent=2)
+        write_json_atomic(HOLDINGS_FILE, [h.to_dict() for h in holdings], indent=2)
 
     def _load_transactions(self) -> list[Transaction]:
         if not os.path.exists(TRANSACTIONS_FILE):
@@ -59,8 +58,7 @@ class PortfolioManager:
             return []
 
     def _save_transactions(self, transactions: list[Transaction]) -> None:
-        with open(TRANSACTIONS_FILE, "w") as f:
-            json.dump([t.to_dict() for t in transactions], f, indent=2)
+        write_json_atomic(TRANSACTIONS_FILE, [t.to_dict() for t in transactions], indent=2)
 
     def _append_transaction(self, transaction: Transaction) -> None:
         transactions = self._load_transactions()
@@ -84,8 +82,14 @@ class PortfolioManager:
 
     def set_cash(self, amount: float) -> float:
         """Set cash balance to a specific amount."""
-        with open(CASH_FILE, "w") as f:
-            json.dump({"balance": round(amount, 2), "last_updated": datetime.now().isoformat()}, f, indent=2)
+        write_json_atomic(
+            CASH_FILE,
+            {
+                "balance": round(amount, 2),
+                "last_updated": datetime.now().isoformat(),
+            },
+            indent=2,
+        )
         return amount
 
     def adjust_cash(self, delta: float) -> float:
@@ -217,7 +221,7 @@ class PortfolioManager:
 
         if removed:
             try:
-                info = yf.Ticker(ticker).info
+                info = get_ticker_info(ticker)
                 price = info.get("currentPrice", info.get("regularMarketPrice", removed.avg_cost))
             except Exception:
                 price = removed.avg_cost
@@ -254,15 +258,14 @@ class PortfolioManager:
         if not holdings:
             return []
 
-        tickers_str = " ".join(h.ticker for h in holdings)
         enriched = []
 
         try:
-            tickers_obj = yf.Tickers(tickers_str)
+            ticker_infos = get_batch_ticker_info(h.ticker for h in holdings)
 
             for holding in holdings:
                 try:
-                    info = tickers_obj.tickers[holding.ticker].info or {}
+                    info = ticker_infos.get(holding.ticker, {})
                     current_price = info.get(
                         "currentPrice",
                         info.get("regularMarketPrice", 0)
@@ -291,7 +294,7 @@ class PortfolioManager:
                         date_added=holding.date_added,
                     ))
         except Exception as e:
-            print(f"  ⚠ Batch yfinance fetch failed: {e}")
+            print(f"  ⚠ Batch market-data fetch failed: {e}")
             for holding in holdings:
                 enriched.append(EnrichedHolding(
                     ticker=holding.ticker,

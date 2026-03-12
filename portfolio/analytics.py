@@ -7,20 +7,22 @@ Uses each holding's date_added to only count its contribution from that date.
 
 import numpy as np
 import pandas as pd
-import yfinance as yf
 from datetime import datetime, timedelta
-from typing import Optional
 
+from services.market_data_service import download_close_prices
 from .models import EnrichedHolding
 
 
 def calculate_portfolio_performance(
     enriched_holdings: list[EnrichedHolding],
     period: str = "1y",
+    cash_balance: float = 0.0,
 ) -> dict:
     """
     Calculate portfolio-level performance metrics.
     Each holding only contributes to the portfolio value from its date_added.
+    To avoid treating later purchases as performance, assume the account began
+    with enough cash to fund each recorded position at its purchase cost.
     """
 
     if not enriched_holdings:
@@ -49,7 +51,7 @@ def calculate_portfolio_performance(
     all_tickers = tickers + ["^GSPC"]
 
     try:
-        price_data = yf.download(all_tickers, progress=False, **download_kwargs)["Close"]
+        price_data = download_close_prices(all_tickers, **download_kwargs)
     except Exception as e:
         print(f"  ⚠ Failed to download price data: {e}")
         return _empty_performance()
@@ -66,9 +68,8 @@ def calculate_portfolio_performance(
         return _empty_performance()
 
     # ---------------------------------------------------------------
-    # 3. Build date-aware portfolio value time series
+    # 3. Build date-aware holdings and synthetic cash time series
     # ---------------------------------------------------------------
-    # Parse each holding's date_added
     holdings_dates = {}
     for h in enriched_holdings:
         try:
@@ -79,8 +80,9 @@ def calculate_portfolio_performance(
             holdings_dates[h.ticker] = start_date
 
     holdings_map = {h.ticker: h for h in enriched_holdings}
+    first_visible_date = price_data.index[0]
 
-    portfolio_value = pd.Series(0.0, index=price_data.index)
+    holdings_value = pd.Series(0.0, index=price_data.index)
     for ticker in tickers:
         if ticker not in price_data.columns:
             continue
@@ -92,31 +94,36 @@ def calculate_portfolio_performance(
         mask = price_data.index >= pd.Timestamp(add_date.date())
         contribution = price_data[ticker] * h.shares
         contribution = contribution.where(mask, 0.0)
-        portfolio_value += contribution
+        holdings_value += contribution
 
-    # Also calculate cost basis time series (for accurate return calculations)
-    cost_basis = pd.Series(0.0, index=price_data.index)
+    # Start with any explicit positive cash balance and synthetically reserve
+    # purchase cash before each position becomes active.
+    starting_cash = max(float(cash_balance), 0.0)
+    synthetic_cash = pd.Series(starting_cash, index=price_data.index)
+
     for ticker in tickers:
-        if ticker not in price_data.columns:
-            continue
-
         h = holdings_map[ticker]
-        add_date = holdings_dates[ticker]
-        mask = price_data.index >= pd.Timestamp(add_date.date())
-        cost_contribution = pd.Series(h.shares * h.avg_cost, index=price_data.index)
-        cost_contribution = cost_contribution.where(mask, 0.0)
-        cost_basis += cost_contribution
+        add_date = pd.Timestamp(holdings_dates[ticker].date())
+        reserve_amount = h.shares * h.avg_cost
+
+        if add_date > first_visible_date:
+            reserve_mask = price_data.index < add_date
+            reserve_series = pd.Series(reserve_amount, index=price_data.index)
+            synthetic_cash += reserve_series.where(reserve_mask, 0.0)
+
+    portfolio_equity = holdings_value + synthetic_cash
 
     # Only consider dates where we have at least one holding
-    active_mask = portfolio_value > 0
+    active_mask = portfolio_equity > 0
     if not active_mask.any():
         return _empty_performance()
 
-    first_active = portfolio_value[active_mask].index[0]
-    portfolio_value = portfolio_value.loc[first_active:]
-    cost_basis = cost_basis.loc[first_active:]
+    first_active = portfolio_equity[active_mask].index[0]
+    portfolio_equity = portfolio_equity.loc[first_active:]
+    holdings_value = holdings_value.loc[first_active:]
+    synthetic_cash = synthetic_cash.loc[first_active:]
 
-    portfolio_returns = portfolio_value.pct_change().dropna()
+    portfolio_returns = portfolio_equity.pct_change().dropna()
     # Remove infinite or huge returns (from 0 -> value transitions)
     portfolio_returns = portfolio_returns.replace([np.inf, -np.inf], 0)
     portfolio_returns = portfolio_returns[portfolio_returns.abs() < 1]  # Cap at 100%
@@ -135,10 +142,10 @@ def calculate_portfolio_performance(
     # ---------------------------------------------------------------
     # 5. Total return (based on current value vs cost basis)
     # ---------------------------------------------------------------
-    current_value = portfolio_value.iloc[-1]
-    current_cost = cost_basis.iloc[-1]
-    if current_cost > 0:
-        total_return_pct = ((current_value / current_cost) - 1) * 100
+    initial_equity = portfolio_equity.iloc[0]
+    current_equity = portfolio_equity.iloc[-1]
+    if initial_equity > 0:
+        total_return_pct = ((current_equity / initial_equity) - 1) * 100
     else:
         total_return_pct = 0.0
 
@@ -146,8 +153,8 @@ def calculate_portfolio_performance(
     # 6. Annualized return
     # ---------------------------------------------------------------
     trading_days = len(portfolio_returns)
-    if trading_days > 0 and current_cost > 0:
-        total_return_decimal = current_value / current_cost
+    if trading_days > 0 and initial_equity > 0:
+        total_return_decimal = current_equity / initial_equity
         years = trading_days / 252
         annualized_return_pct = ((total_return_decimal ** (1 / years)) - 1) * 100 if years > 0 else 0
     else:
@@ -207,8 +214,16 @@ def calculate_portfolio_performance(
     # 11. Build history arrays for charting
     # ---------------------------------------------------------------
     portfolio_history = []
-    for date, value in portfolio_value.items():
+    normalized_portfolio = ((portfolio_equity / initial_equity) - 1) * 100 if initial_equity > 0 else portfolio_equity * 0
+    for date, value in normalized_portfolio.items():
         portfolio_history.append({
+            "date": date.strftime("%Y-%m-%d") if hasattr(date, "strftime") else str(date),
+            "value": round(float(value), 2),
+        })
+
+    portfolio_value_history = []
+    for date, value in portfolio_equity.items():
+        portfolio_value_history.append({
             "date": date.strftime("%Y-%m-%d") if hasattr(date, "strftime") else str(date),
             "value": round(float(value), 2),
         })
@@ -216,13 +231,12 @@ def calculate_portfolio_performance(
     benchmark_history = []
     if not benchmark_prices.empty:
         bench_start = benchmark_prices.iloc[0]
-        port_start = portfolio_value.iloc[0] if portfolio_value.iloc[0] != 0 else 1
+        normalized_benchmark = ((benchmark_prices / bench_start) - 1) * 100 if bench_start != 0 else benchmark_prices * 0
 
-        for date, value in benchmark_prices.items():
-            normalized = (value / bench_start) * port_start if bench_start != 0 else 0
+        for date, value in normalized_benchmark.items():
             benchmark_history.append({
                 "date": date.strftime("%Y-%m-%d") if hasattr(date, "strftime") else str(date),
-                "value": round(float(normalized), 2),
+                "value": round(float(value), 2),
             })
 
     return {
@@ -234,6 +248,7 @@ def calculate_portfolio_performance(
         "best_performer": best,
         "worst_performer": worst,
         "portfolio_history": portfolio_history,
+        "portfolio_value_history": portfolio_value_history,
         "benchmark_history": benchmark_history,
     }
 
@@ -248,5 +263,6 @@ def _empty_performance() -> dict:
         "best_performer": None,
         "worst_performer": None,
         "portfolio_history": [],
+        "portfolio_value_history": [],
         "benchmark_history": [],
     }
