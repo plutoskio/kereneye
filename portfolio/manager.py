@@ -30,6 +30,15 @@ os.makedirs(CACHE_DIR, exist_ok=True)
 class PortfolioManager:
     """Manages portfolio holdings, transactions, and cash with JSON persistence."""
 
+    @staticmethod
+    def _normalize_effective_timestamp(value: str | None) -> str:
+        if value:
+            cleaned = value.strip()
+            if len(cleaned) == 10:
+                return f"{cleaned}T00:00:00"
+            return cleaned
+        return datetime.now().isoformat()
+
     # -------------------------------------------------------------------
     # Persistence helpers
     # -------------------------------------------------------------------
@@ -53,7 +62,8 @@ class PortfolioManager:
         try:
             with open(TRANSACTIONS_FILE, "r") as f:
                 data = json.load(f)
-            return [Transaction.from_dict(t) for t in data]
+            transactions = [Transaction.from_dict(t) for t in data]
+            return self._migrate_legacy_transactions(transactions)
         except (json.JSONDecodeError, KeyError):
             return []
 
@@ -64,6 +74,49 @@ class PortfolioManager:
         transactions = self._load_transactions()
         transactions.append(transaction)
         self._save_transactions(transactions)
+
+    def _migrate_legacy_transactions(self, transactions: list[Transaction]) -> list[Transaction]:
+        """
+        Legacy buy transactions were saved with the entry timestamp instead of the
+        holding's effective purchase date. If a ticker has one open buy and no
+        sells, align that transaction to the holding's stored date_added.
+        """
+        holdings = {h.ticker: h for h in self._load_holdings() if h.date_added}
+        sells_by_ticker = {t.ticker for t in transactions if t.type == "sell" and t.ticker}
+        changed = False
+
+        for ticker, holding in holdings.items():
+            buys = [t for t in transactions if t.type == "buy" and t.ticker == ticker]
+            if ticker in sells_by_ticker or len(buys) != 1:
+                continue
+
+            buy = buys[0]
+            if abs(buy.shares - holding.shares) > 1e-9:
+                continue
+            if abs(buy.price - holding.avg_cost) > 1e-6:
+                continue
+
+            normalized_date = self._normalize_effective_timestamp(holding.date_added)
+            if buy.timestamp != normalized_date:
+                buy.timestamp = normalized_date
+                changed = True
+
+        if changed:
+            self._save_transactions(transactions)
+
+        return transactions
+
+    def _write_cash_balance(self, amount: float) -> float:
+        rounded_amount = round(amount, 2)
+        write_json_atomic(
+            CASH_FILE,
+            {
+                "balance": rounded_amount,
+                "last_updated": datetime.now().isoformat(),
+            },
+            indent=2,
+        )
+        return rounded_amount
 
     # -------------------------------------------------------------------
     # Cash balance
@@ -80,23 +133,28 @@ class PortfolioManager:
         except (json.JSONDecodeError, KeyError):
             return 0.0
 
-    def set_cash(self, amount: float) -> float:
-        """Set cash balance to a specific amount."""
-        write_json_atomic(
-            CASH_FILE,
-            {
-                "balance": round(amount, 2),
-                "last_updated": datetime.now().isoformat(),
-            },
-            indent=2,
-        )
-        return amount
+    def set_cash(self, amount: float, effective_at: str | None = None) -> float:
+        """Set cash balance to a specific amount and log the external cash flow delta."""
+        current = self.get_cash()
+        new_balance = self._write_cash_balance(amount)
+        delta = round(new_balance - current, 2)
+
+        if abs(delta) > 1e-9:
+            self._append_transaction(
+                Transaction(
+                    type="cash_deposit" if delta > 0 else "cash_withdrawal",
+                    amount=abs(delta),
+                    timestamp=self._normalize_effective_timestamp(effective_at),
+                )
+            )
+
+        return new_balance
 
     def adjust_cash(self, delta: float) -> float:
         """Adjust cash balance by a delta amount (positive = add, negative = deduct)."""
         current = self.get_cash()
         new_balance = current + delta
-        return self.set_cash(new_balance)
+        return self._write_cash_balance(new_balance)
 
     # -------------------------------------------------------------------
     # Realized P&L
@@ -121,19 +179,23 @@ class PortfolioManager:
         holdings = self._load_holdings()
 
         existing = next((h for h in holdings if h.ticker == ticker), None)
+        effective_date = date_added or datetime.now().date().isoformat()
+        effective_timestamp = self._normalize_effective_timestamp(effective_date)
 
         if existing:
             total_shares = existing.shares + shares
             total_cost = (existing.shares * existing.avg_cost) + (shares * avg_cost)
             existing.avg_cost = total_cost / total_shares
             existing.shares = total_shares
+            if not existing.date_added or effective_date < existing.date_added:
+                existing.date_added = effective_date
             result = existing
         else:
             new_holding = Holding(
                 ticker=ticker,
                 shares=shares,
                 avg_cost=avg_cost,
-                date_added=date_added or datetime.now().isoformat(),
+                date_added=effective_date,
             )
             holdings.append(new_holding)
             result = new_holding
@@ -149,12 +211,12 @@ class PortfolioManager:
             type="buy",
             shares=shares,
             price=avg_cost,
-            timestamp=datetime.now().isoformat(),
+            timestamp=effective_timestamp,
         ))
 
         return result
 
-    def sell_shares(self, ticker: str, shares: float, sell_price: float) -> dict:
+    def sell_shares(self, ticker: str, shares: float, sell_price: float, effective_at: str | None = None) -> dict:
         """
         Sell shares of a holding. Calculates realized P&L.
         If all shares sold, removes the holding.
@@ -192,7 +254,7 @@ class PortfolioManager:
             type="sell",
             shares=shares,
             price=sell_price,
-            timestamp=datetime.now().isoformat(),
+            timestamp=self._normalize_effective_timestamp(effective_at),
             realized_pnl=realized_pnl,
         ))
 
@@ -247,6 +309,9 @@ class PortfolioManager:
     def get_transactions(self) -> list[dict]:
         transactions = self._load_transactions()
         return [t.to_dict() for t in reversed(transactions)]
+
+    def get_transaction_models(self) -> list[Transaction]:
+        return self._load_transactions()
 
     # -------------------------------------------------------------------
     # Enriched data (with live prices)

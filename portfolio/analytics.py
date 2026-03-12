@@ -1,28 +1,66 @@
 """
 Portfolio Analytics — Performance calculations for the portfolio.
 
-Computes returns, Sharpe ratio, Beta vs S&P 500, and allocation breakdowns.
-Uses each holding's date_added to only count its contribution from that date.
+Computes returns, Sharpe ratio, Beta vs S&P 500, and allocation breakdowns
+by replaying the transaction ledger into daily portfolio equity.
 """
+
+from collections import defaultdict
+from datetime import datetime, timedelta
 
 import numpy as np
 import pandas as pd
-from datetime import datetime, timedelta
 
 from services.market_data_service import download_close_prices
-from .models import EnrichedHolding
+from .models import EnrichedHolding, Transaction
+
+
+def _parse_timestamp(value: str | None, fallback: datetime) -> pd.Timestamp:
+    try:
+        return pd.Timestamp(datetime.fromisoformat(value)).normalize()
+    except (TypeError, ValueError):
+        return pd.Timestamp(fallback.date())
+
+
+def _resolve_market_date(tx_date: pd.Timestamp, market_index: pd.DatetimeIndex) -> pd.Timestamp | None:
+    if market_index.empty:
+        return None
+
+    position = market_index.searchsorted(tx_date)
+    if position >= len(market_index):
+        return market_index[-1]
+    return market_index[position]
+
+
+def _build_inferred_transactions(
+    enriched_holdings: list[EnrichedHolding],
+    fallback_date: datetime,
+) -> list[Transaction]:
+    inferred = []
+    for holding in enriched_holdings:
+        inferred.append(
+            Transaction(
+                type="buy",
+                ticker=holding.ticker,
+                shares=holding.shares,
+                price=holding.avg_cost,
+                timestamp=holding.date_added or fallback_date.date().isoformat(),
+            )
+        )
+    return inferred
 
 
 def calculate_portfolio_performance(
     enriched_holdings: list[EnrichedHolding],
+    transactions: list[Transaction],
     period: str = "1y",
     cash_balance: float = 0.0,
 ) -> dict:
     """
     Calculate portfolio-level performance metrics.
-    Each holding only contributes to the portfolio value from its date_added.
-    To avoid treating later purchases as performance, assume the account began
-    with enough cash to fund each recorded position at its purchase cost.
+    Replay the dated transaction ledger to reconstruct historical positions and
+    cash. External cash flows are neutralized in the return series so adding
+    capital does not appear as performance.
     """
 
     if not enriched_holdings:
@@ -47,7 +85,15 @@ def calculate_portfolio_performance(
     # ---------------------------------------------------------------
     # 2. Fetch price history for all holdings + S&P 500
     # ---------------------------------------------------------------
-    tickers = [h.ticker for h in enriched_holdings]
+    ledger_transactions = list(transactions) if transactions else _build_inferred_transactions(enriched_holdings, start_date)
+
+    tickers = sorted(
+        {
+            h.ticker for h in enriched_holdings
+        } | {
+            t.ticker for t in ledger_transactions if t.ticker
+        }
+    )
     all_tickers = tickers + ["^GSPC"]
 
     try:
@@ -62,58 +108,84 @@ def calculate_portfolio_performance(
     if isinstance(price_data, pd.Series):
         price_data = price_data.to_frame(name=all_tickers[0])
 
-    price_data = price_data.ffill().dropna()
+    price_data.index = pd.to_datetime(price_data.index).tz_localize(None).normalize()
+    price_data = price_data.sort_index().ffill()
+    price_data = price_data.dropna(how="all")
 
     if len(price_data) < 2:
         return _empty_performance()
 
     # ---------------------------------------------------------------
-    # 3. Build date-aware holdings and synthetic cash time series
+    # 3. Replay transactions into daily positions and cash
     # ---------------------------------------------------------------
-    holdings_dates = {}
-    for h in enriched_holdings:
-        try:
-            dt = datetime.fromisoformat(h.date_added)
-            holdings_dates[h.ticker] = dt
-        except (ValueError, TypeError):
-            # If no date, assume it was always held
-            holdings_dates[h.ticker] = start_date
+    market_index = price_data.index
+    first_visible_date = market_index[0]
 
-    holdings_map = {h.ticker: h for h in enriched_holdings}
-    first_visible_date = price_data.index[0]
+    sorted_transactions = sorted(
+        ledger_transactions,
+        key=lambda tx: _parse_timestamp(tx.timestamp, start_date),
+    )
 
-    holdings_value = pd.Series(0.0, index=price_data.index)
-    for ticker in tickers:
-        if ticker not in price_data.columns:
+    initial_cash = float(cash_balance) - sum(tx.cash_delta for tx in sorted_transactions)
+    cash = initial_cash
+    positions = defaultdict(float)
+    scheduled_transactions = defaultdict(list)
+
+    for transaction in sorted_transactions:
+        tx_date = _parse_timestamp(transaction.timestamp, start_date)
+
+        if tx_date < first_visible_date:
+            if transaction.type == "buy":
+                positions[transaction.ticker] += transaction.shares
+            elif transaction.type == "sell":
+                positions[transaction.ticker] -= transaction.shares
+            cash += transaction.cash_delta
             continue
 
-        h = holdings_map[ticker]
-        add_date = holdings_dates[ticker]
+        market_date = _resolve_market_date(tx_date, market_index)
+        if market_date is not None:
+            scheduled_transactions[market_date].append(transaction)
 
-        # Create a mask: only count this holding from its date_added
-        mask = price_data.index >= pd.Timestamp(add_date.date())
-        contribution = price_data[ticker] * h.shares
-        contribution = contribution.where(mask, 0.0)
-        holdings_value += contribution
+    equity_points = []
+    holdings_points = []
+    external_flow_points = []
 
-    # Start with any explicit positive cash balance and synthetically reserve
-    # purchase cash before each position becomes active.
-    starting_cash = max(float(cash_balance), 0.0)
-    synthetic_cash = pd.Series(starting_cash, index=price_data.index)
+    for date in market_index:
+        day_external_flow = 0.0
 
-    for ticker in tickers:
-        h = holdings_map[ticker]
-        add_date = pd.Timestamp(holdings_dates[ticker].date())
-        reserve_amount = h.shares * h.avg_cost
+        for transaction in scheduled_transactions.get(date, []):
+            if transaction.type == "buy":
+                positions[transaction.ticker] += transaction.shares
+            elif transaction.type == "sell":
+                positions[transaction.ticker] -= transaction.shares
+                if abs(positions[transaction.ticker]) <= 1e-9:
+                    positions.pop(transaction.ticker, None)
+            elif transaction.type in {"cash_deposit", "cash_withdrawal"}:
+                day_external_flow += transaction.cash_delta
 
-        if add_date > first_visible_date:
-            reserve_mask = price_data.index < add_date
-            reserve_series = pd.Series(reserve_amount, index=price_data.index)
-            synthetic_cash += reserve_series.where(reserve_mask, 0.0)
+            cash += transaction.cash_delta
 
-    portfolio_equity = holdings_value + synthetic_cash
+        holdings_value = 0.0
+        for ticker, shares in positions.items():
+            if ticker not in price_data.columns or abs(shares) <= 1e-9:
+                continue
 
-    # Only consider dates where we have at least one holding
+            price = price_data.at[date, ticker]
+            if pd.isna(price):
+                continue
+
+            holdings_value += float(price) * shares
+
+        portfolio_equity = cash + holdings_value
+        equity_points.append(portfolio_equity)
+        holdings_points.append(holdings_value)
+        external_flow_points.append(day_external_flow)
+
+    portfolio_equity = pd.Series(equity_points, index=market_index, dtype=float)
+    holdings_value = pd.Series(holdings_points, index=market_index, dtype=float)
+    external_flows = pd.Series(external_flow_points, index=market_index, dtype=float)
+
+    # Only consider dates where the account has positive equity
     active_mask = portfolio_equity > 0
     if not active_mask.any():
         return _empty_performance()
@@ -121,12 +193,12 @@ def calculate_portfolio_performance(
     first_active = portfolio_equity[active_mask].index[0]
     portfolio_equity = portfolio_equity.loc[first_active:]
     holdings_value = holdings_value.loc[first_active:]
-    synthetic_cash = synthetic_cash.loc[first_active:]
+    external_flows = external_flows.loc[first_active:]
 
-    portfolio_returns = portfolio_equity.pct_change().dropna()
-    # Remove infinite or huge returns (from 0 -> value transitions)
-    portfolio_returns = portfolio_returns.replace([np.inf, -np.inf], 0)
-    portfolio_returns = portfolio_returns[portfolio_returns.abs() < 1]  # Cap at 100%
+    previous_equity = portfolio_equity.shift(1)
+    portfolio_returns = (portfolio_equity - previous_equity - external_flows) / previous_equity
+    portfolio_returns = portfolio_returns.replace([np.inf, -np.inf], np.nan).dropna()
+    portfolio_returns = portfolio_returns[portfolio_returns.abs() < 1]
 
     # ---------------------------------------------------------------
     # 4. S&P 500 benchmark returns
@@ -142,10 +214,9 @@ def calculate_portfolio_performance(
     # ---------------------------------------------------------------
     # 5. Total return (based on current value vs cost basis)
     # ---------------------------------------------------------------
-    initial_equity = portfolio_equity.iloc[0]
-    current_equity = portfolio_equity.iloc[-1]
-    if initial_equity > 0:
-        total_return_pct = ((current_equity / initial_equity) - 1) * 100
+    if len(portfolio_returns) > 0:
+        cumulative_return = (1 + portfolio_returns).prod()
+        total_return_pct = (cumulative_return - 1) * 100
     else:
         total_return_pct = 0.0
 
@@ -153,8 +224,8 @@ def calculate_portfolio_performance(
     # 6. Annualized return
     # ---------------------------------------------------------------
     trading_days = len(portfolio_returns)
-    if trading_days > 0 and initial_equity > 0:
-        total_return_decimal = current_equity / initial_equity
+    if trading_days > 0:
+        total_return_decimal = 1 + (total_return_pct / 100)
         years = trading_days / 252
         annualized_return_pct = ((total_return_decimal ** (1 / years)) - 1) * 100 if years > 0 else 0
     else:
@@ -214,7 +285,11 @@ def calculate_portfolio_performance(
     # 11. Build history arrays for charting
     # ---------------------------------------------------------------
     portfolio_history = []
-    normalized_portfolio = ((portfolio_equity / initial_equity) - 1) * 100 if initial_equity > 0 else portfolio_equity * 0
+    normalized_portfolio = pd.Series(0.0, index=portfolio_equity.index, dtype=float)
+    if len(portfolio_returns) > 0:
+        cumulative_growth = (1 + portfolio_returns).cumprod()
+        normalized_portfolio.loc[cumulative_growth.index] = (cumulative_growth - 1) * 100
+
     for date, value in normalized_portfolio.items():
         portfolio_history.append({
             "date": date.strftime("%Y-%m-%d") if hasattr(date, "strftime") else str(date),

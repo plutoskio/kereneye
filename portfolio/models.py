@@ -3,8 +3,6 @@ Portfolio Data Models — Dataclasses for holdings, transactions, and summaries.
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime
-from typing import Optional
 
 
 @dataclass
@@ -40,25 +38,48 @@ class Holding:
 @dataclass
 class Transaction:
     """A buy or sell transaction log entry."""
-    ticker: str
-    type: str  # "buy" or "sell"
-    shares: float
-    price: float
+    type: str  # "buy", "sell", "cash_deposit", "cash_withdrawal"
+    ticker: str = ""
+    shares: float = 0.0
+    price: float = 0.0
+    amount: float = 0.0
     timestamp: str = ""  # ISO format string
     realized_pnl: float = 0.0  # P&L on this transaction (sell only)
 
     @property
     def total_value(self) -> float:
+        if self.type in {"cash_deposit", "cash_withdrawal"}:
+            return self.amount
         return self.shares * self.price
+
+    @property
+    def is_cash_flow(self) -> bool:
+        return self.type in {"cash_deposit", "cash_withdrawal"}
+
+    @property
+    def cash_delta(self) -> float:
+        if self.type == "buy":
+            return -(self.shares * self.price)
+        if self.type == "sell":
+            return self.shares * self.price
+        if self.type == "cash_deposit":
+            return self.amount
+        if self.type == "cash_withdrawal":
+            return -self.amount
+        return 0.0
 
     def to_dict(self) -> dict:
         d = {
-            "ticker": self.ticker,
             "type": self.type,
-            "shares": self.shares,
-            "price": self.price,
             "timestamp": self.timestamp,
         }
+        if self.ticker:
+            d["ticker"] = self.ticker
+        if self.type in {"buy", "sell"}:
+            d["shares"] = self.shares
+            d["price"] = self.price
+        if self.is_cash_flow:
+            d["amount"] = round(self.amount, 2)
         if self.type == "sell":
             d["realized_pnl"] = round(self.realized_pnl, 2)
         return d
@@ -66,10 +87,11 @@ class Transaction:
     @classmethod
     def from_dict(cls, d: dict) -> "Transaction":
         return cls(
-            ticker=d["ticker"],
             type=d["type"],
-            shares=d["shares"],
-            price=d["price"],
+            ticker=d.get("ticker", ""),
+            shares=d.get("shares", 0.0),
+            price=d.get("price", 0.0),
+            amount=d.get("amount", 0.0),
             timestamp=d.get("timestamp", ""),
             realized_pnl=d.get("realized_pnl", 0.0),
         )

@@ -31,10 +31,12 @@ class AddHoldingRequest(BaseModel):
 class SellRequest(BaseModel):
     shares: float
     price: float
+    date: str | None = None
 
 
 class CashRequest(BaseModel):
     amount: float
+    date: str | None = None
 
 
 def _fetch_holdings_news(holdings) -> list[dict]:
@@ -189,7 +191,7 @@ async def sell_portfolio_holding(ticker: str, req: SellRequest):
     """Sell shares of a holding and realize P&L."""
     ticker = ticker.upper()
     try:
-        return portfolio_manager.sell_shares(ticker, req.shares, req.price)
+        return portfolio_manager.sell_shares(ticker, req.shares, req.price, req.date)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -215,7 +217,7 @@ async def get_cash_balance():
 @router.post("/cash")
 async def set_cash_balance(req: CashRequest):
     """Set cash balance to a specific amount."""
-    new_balance = portfolio_manager.set_cash(req.amount)
+    new_balance = portfolio_manager.set_cash(req.amount, req.date)
     return {"cash_balance": new_balance, "message": f"Cash balance set to ${new_balance:,.2f}"}
 
 
@@ -238,8 +240,9 @@ async def get_portfolio_performance(period: str = "1y"):
 
     try:
         enriched = await asyncer.asyncify(portfolio_manager.get_enriched_holdings)()
+        transactions = portfolio_manager.get_transaction_models()
         cash_balance = portfolio_manager.get_cash()
-        return await asyncer.asyncify(calculate_portfolio_performance)(enriched, period, cash_balance)
+        return await asyncer.asyncify(calculate_portfolio_performance)(enriched, transactions, period, cash_balance)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

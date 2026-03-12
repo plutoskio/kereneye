@@ -3,13 +3,14 @@ import { X, Wallet, Loader2 } from 'lucide-react';
 
 export default function CashModal({ currentCash, onClose, onSave }) {
   const [amount, setAmount] = useState(currentCash?.toString() || '0');
+  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
     try {
-      await onSave(parseFloat(amount) || 0);
+      await onSave(parseFloat(amount) || 0, date);
     } catch {
       setLoading(false);
     }
@@ -46,9 +47,22 @@ export default function CashModal({ currentCash, onClose, onSave }) {
               This is your available cash for buying stocks. Buying deducts, selling adds.
             </p>
           </div>
+          <div>
+            <label className="block text-[11px] font-bold text-altruistGray-500 uppercase tracking-widest mb-2">
+              Effective Date
+            </label>
+            <input
+              type="date"
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+              max={new Date().toISOString().split('T')[0]}
+              className="w-full bg-altruistGray-50 border border-altruistGray-200 rounded-sm px-4 py-3 text-[14px] font-mono text-altruistDark focus:outline-none focus:border-altruistBlue focus:bg-altruistWhite transition-colors"
+              required
+            />
+          </div>
           <button
             type="submit"
-            disabled={loading}
+            disabled={loading || !date}
             className="w-full bg-altruistBlue text-white py-3 rounded-sm text-[13px] font-bold uppercase tracking-wide hover:bg-blue-800 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
           >
             {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Save'}

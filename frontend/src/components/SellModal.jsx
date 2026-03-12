@@ -4,6 +4,7 @@ import { X, TrendingDown, Loader2, AlertCircle, DollarSign } from 'lucide-react'
 export default function SellModal({ holding, onClose, onSell }) {
   const [shares, setShares] = useState('');
   const [price, setPrice] = useState(holding.current_price?.toString() || '');
+  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
@@ -14,7 +15,7 @@ export default function SellModal({ holding, onClose, onSell }) {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!shares || !price || sharesToSell <= 0) return;
+    if (!shares || !price || !date || sharesToSell <= 0) return;
     if (sharesToSell > holding.shares) {
       setError(`You only have ${holding.shares} shares`);
       return;
@@ -24,7 +25,7 @@ export default function SellModal({ holding, onClose, onSell }) {
     setError(null);
 
     try {
-      await onSell(holding.ticker, sharesToSell, sellPrice);
+      await onSell(holding.ticker, sharesToSell, sellPrice, date);
     } catch (err) {
       setError(err.message || 'Failed to sell');
       setLoading(false);
@@ -79,7 +80,7 @@ export default function SellModal({ holding, onClose, onSell }) {
             </div>
           )}
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-3 gap-4">
             <div>
               <label className="block text-[11px] font-bold text-altruistGray-500 uppercase tracking-widest mb-2">
                 Shares to Sell
@@ -121,6 +122,19 @@ export default function SellModal({ holding, onClose, onSell }) {
                 required
               />
             </div>
+            <div>
+              <label className="block text-[11px] font-bold text-altruistGray-500 uppercase tracking-widest mb-2">
+                Date
+              </label>
+              <input
+                type="date"
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+                max={new Date().toISOString().split('T')[0]}
+                className="w-full bg-altruistGray-50 border border-altruistGray-200 rounded-sm px-4 py-3 text-[14px] font-mono text-altruistDark focus:outline-none focus:border-red-400 focus:bg-altruistWhite transition-colors"
+                required
+              />
+            </div>
           </div>
 
           {/* Preview */}
@@ -151,7 +165,7 @@ export default function SellModal({ holding, onClose, onSell }) {
 
           <button
             type="submit"
-            disabled={loading || !shares || !price || sharesToSell <= 0}
+            disabled={loading || !shares || !price || !date || sharesToSell <= 0}
             className="w-full bg-red-600 text-white py-3 rounded-sm text-[13px] font-bold uppercase tracking-wide hover:bg-red-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
           >
             {loading ? (

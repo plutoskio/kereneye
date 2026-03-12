@@ -241,9 +241,9 @@ export default function PortfolioDashboard() {
     }
   };
 
-  const handleSellHolding = async (ticker, shares, price) => {
+  const handleSellHolding = async (ticker, shares, price, date) => {
     try {
-      await sellPortfolioHolding(ticker, { shares, price });
+      await sellPortfolioHolding(ticker, { shares, price, date });
       setShowSellModal(null);
       fetchHoldings();
     } catch (err) {
@@ -251,9 +251,9 @@ export default function PortfolioDashboard() {
     }
   };
 
-  const handleSetCash = async (amount) => {
+  const handleSetCash = async (amount, date) => {
     try {
-      await setPortfolioCash({ amount });
+      await setPortfolioCash({ amount, date });
       setShowCashModal(false);
       fetchHoldings();
     } catch (err) {
