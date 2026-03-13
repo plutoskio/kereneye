@@ -439,7 +439,8 @@ AGGREGATED RECENT NEWS FOR OPEN POSITIONS:
 Provide a deeply reflective and insightful impact report. Do NOT just list the headlines.
 1. Distill the Noise: Filter out generic press releases, minor product updates, and clickbait.
 2. The Real Story: What is the underlying theme or structural shift happening across these holdings? Are multiple companies in the portfolio facing similar macro/industry headwinds or tailwinds?
-3. Impact Assessment: For the holdings with exactly material news, reflect on how this changes their long-term thesis or short-term volatility. Are their moats expanding or decaying because of this?
+3. Price Confirmation: Use the supplied price-reaction context for each ticker. Call out when the market is validating the narrative, fading it, or reacting in the opposite direction of the headlines.
+4. Impact Assessment: For the holdings with exactly material news, reflect on how this changes their long-term thesis or short-term volatility. Are their moats expanding or decaying because of this?
 
 Format your response exactly as follows:
 ### Portfolio Wide Insights

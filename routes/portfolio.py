@@ -6,13 +6,18 @@ from datetime import datetime, timedelta
 from typing import Literal
 
 import asyncer
+import pandas as pd
 import pytz
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from crew.research_crew import run_portfolio_news_crew
 from portfolio.analytics import calculate_portfolio_performance
-from services.market_data_service import get_batch_ticker_news, get_ticker_info
+from services.market_data_service import (
+    download_close_prices,
+    get_batch_premium_ticker_news,
+    get_ticker_info,
+)
 from services.runtime_state import (
     portfolio_manager,
     portfolio_news_task_status,
@@ -20,6 +25,10 @@ from services.runtime_state import (
 
 
 router = APIRouter(prefix="/api/portfolio", tags=["portfolio"])
+
+PORTFOLIO_NEWS_LOOKBACK_DAYS = 7
+PORTFOLIO_NEWS_LIMIT_PER_TICKER = 5
+PORTFOLIO_NEWS_PRICE_PERIOD = "1mo"
 
 
 class AddHoldingRequest(BaseModel):
@@ -41,57 +50,206 @@ class CashRequest(BaseModel):
     action: Literal["snapshot", "deposit", "withdraw"] = "snapshot"
 
 
+def _normalize_close_prices(price_data, symbols: list[str]) -> pd.DataFrame:
+    if isinstance(price_data, pd.Series):
+        price_data = price_data.to_frame(name=symbols[0])
+
+    if not isinstance(price_data, pd.DataFrame) or price_data.empty:
+        return pd.DataFrame()
+
+    normalized = price_data.copy()
+    normalized.index = pd.to_datetime(normalized.index)
+    if getattr(normalized.index, "tz", None) is not None:
+        normalized.index = normalized.index.tz_localize(None)
+    normalized.index = normalized.index.normalize()
+    normalized = normalized.sort_index().ffill().dropna(how="all")
+
+    if len(symbols) == 1 and list(normalized.columns) != [symbols[0]]:
+        normalized.columns = [symbols[0]]
+
+    return normalized
+
+
+def _parse_published_timestamp(value: str | None) -> pd.Timestamp | None:
+    if not value:
+        return None
+
+    parsed = pd.to_datetime(value, utc=True, errors="coerce")
+    if pd.isna(parsed):
+        parsed = pd.to_datetime(value, errors="coerce")
+    if pd.isna(parsed):
+        return None
+
+    try:
+        parsed = parsed.tz_localize(None)
+    except TypeError:
+        pass
+    return parsed
+
+
+def _pct_change(current_value: float | None, baseline_value: float | None) -> float | None:
+    if current_value is None or baseline_value in (None, 0):
+        return None
+    return round(((current_value / baseline_value) - 1) * 100, 2)
+
+
+def _get_close_before_publication(price_series: pd.Series, published_at: pd.Timestamp) -> tuple[pd.Timestamp | None, float | None]:
+    valid = price_series.dropna()
+    if valid.empty:
+        return None, None
+
+    published_day = published_at.normalize()
+    earlier = valid[valid.index < published_day]
+    if not earlier.empty:
+        return earlier.index[-1], float(earlier.iloc[-1])
+
+    same_or_earlier = valid[valid.index <= published_day]
+    if not same_or_earlier.empty:
+        return same_or_earlier.index[-1], float(same_or_earlier.iloc[-1])
+
+    return valid.index[0], float(valid.iloc[0])
+
+
+def _build_price_context(ticker: str, price_frame: pd.DataFrame, articles: list[dict]) -> dict:
+    if price_frame.empty or ticker not in price_frame.columns:
+        return {
+            "last_close": None,
+            "last_close_date": None,
+            "one_day_change_pct": None,
+            "five_day_change_pct": None,
+            "since_first_article_change_pct": None,
+            "since_first_article_label": None,
+            "since_first_article_base_date": None,
+        }
+
+    series = price_frame[ticker].dropna()
+    if series.empty:
+        return {
+            "last_close": None,
+            "last_close_date": None,
+            "one_day_change_pct": None,
+            "five_day_change_pct": None,
+            "since_first_article_change_pct": None,
+            "since_first_article_label": None,
+            "since_first_article_base_date": None,
+        }
+
+    last_close = float(series.iloc[-1])
+    last_close_date = series.index[-1].strftime("%Y-%m-%d")
+    one_day_change_pct = _pct_change(last_close, float(series.iloc[-2])) if len(series) >= 2 else None
+    five_day_change_pct = _pct_change(last_close, float(series.iloc[-6])) if len(series) >= 6 else None
+
+    published_dates = [
+        parsed for parsed in (_parse_published_timestamp(article.get("published")) for article in articles)
+        if parsed is not None
+    ]
+    earliest_article = min(published_dates) if published_dates else None
+    base_date, base_close = _get_close_before_publication(series, earliest_article) if earliest_article is not None else (None, None)
+    since_first_article_change_pct = _pct_change(last_close, base_close)
+
+    return {
+        "last_close": round(last_close, 2),
+        "last_close_date": last_close_date,
+        "one_day_change_pct": one_day_change_pct,
+        "five_day_change_pct": five_day_change_pct,
+        "since_first_article_change_pct": since_first_article_change_pct,
+        "since_first_article_label": earliest_article.strftime("%Y-%m-%d") if earliest_article is not None else None,
+        "since_first_article_base_date": base_date.strftime("%Y-%m-%d") if base_date is not None else None,
+    }
+
+
 def _fetch_holdings_news(holdings) -> list[dict]:
+    symbols = [holding.ticker for holding in holdings]
     results = []
-    news_by_ticker = get_batch_ticker_news((holding.ticker for holding in holdings), limit=5)
+    news_by_ticker = get_batch_premium_ticker_news(
+        symbols,
+        limit=PORTFOLIO_NEWS_LIMIT_PER_TICKER,
+        days=PORTFOLIO_NEWS_LOOKBACK_DAYS,
+    )
+
+    try:
+        raw_prices = download_close_prices(symbols, period=PORTFOLIO_NEWS_PRICE_PERIOD)
+        price_frame = _normalize_close_prices(raw_prices, symbols)
+    except Exception:
+        price_frame = pd.DataFrame()
 
     for holding in holdings:
         try:
             news_raw = news_by_ticker.get(holding.ticker, [])
             news_items = []
-            for item in news_raw[:5]:
-                content = item.get("content", item)
-                title = content.get("title", "")
-
-                provider = content.get("provider")
-                if isinstance(provider, dict):
-                    publisher = provider.get("displayName", "")
-                else:
-                    publisher = content.get("publisher", "")
-
-                url_obj = content.get("clickThroughUrl") or content.get("canonicalUrl")
-                if isinstance(url_obj, dict):
-                    link = url_obj.get("url", "")
-                else:
-                    link = content.get("link", "")
-
+            for item in news_raw[:PORTFOLIO_NEWS_LIMIT_PER_TICKER]:
                 news_items.append(
                     {
-                        "title": title,
-                        "publisher": publisher,
-                        "link": link,
+                        "title": item.get("title", ""),
+                        "publisher": item.get("publisher", ""),
+                        "link": item.get("link", ""),
+                        "published": item.get("published", ""),
+                        "teaser": item.get("teaser", ""),
                     }
                 )
 
-            results.append({"ticker": holding.ticker, "news": news_items})
+            latest_published = max((article.get("published", "") for article in news_items), default="")
+            results.append(
+                {
+                    "ticker": holding.ticker,
+                    "news": news_items,
+                    "news_count": len(news_items),
+                    "latest_published": latest_published,
+                    "price_context": _build_price_context(holding.ticker, price_frame, news_items),
+                }
+            )
         except Exception as e:
             print(f"  ⚠ News fetch failed for {holding.ticker}: {e}")
-            results.append({"ticker": holding.ticker, "news": []})
+            results.append(
+                {
+                    "ticker": holding.ticker,
+                    "news": [],
+                    "news_count": 0,
+                    "latest_published": "",
+                    "price_context": _build_price_context(holding.ticker, price_frame, []),
+                }
+            )
 
-    return results
+    return sorted(results, key=lambda item: item.get("latest_published", ""), reverse=True)
 
 
 def _build_portfolio_news_digest(holdings_news: list[dict]) -> str:
     lines = ["PORTFOLIO NEWS DIGEST:", ""]
     for holding_news in holdings_news:
         lines.append(f"TICKER: {holding_news['ticker']}")
+        price_context = holding_news.get("price_context") or {}
+        price_bits = []
+        if price_context.get("last_close") is not None:
+            price_bits.append(
+                f"Last close: ${price_context['last_close']:.2f} on {price_context['last_close_date']}"
+            )
+        if price_context.get("one_day_change_pct") is not None:
+            price_bits.append(f"1D: {price_context['one_day_change_pct']:+.2f}%")
+        if price_context.get("five_day_change_pct") is not None:
+            price_bits.append(f"5D: {price_context['five_day_change_pct']:+.2f}%")
+        if price_context.get("since_first_article_change_pct") is not None:
+            since_label = price_context.get("since_first_article_label") or "first article"
+            price_bits.append(
+                f"Since first article ({since_label}): {price_context['since_first_article_change_pct']:+.2f}%"
+            )
+        if price_bits:
+            lines.append(f"  Price Reaction: {' | '.join(price_bits)}")
+
         if not holding_news["news"]:
             lines.append("  - No material news found.")
         else:
             for article in holding_news["news"]:
+                published = article.get("published")
+                teaser = article.get("teaser")
                 lines.append(
-                    f"  - [{article['publisher']}] {article['title']} ({article['link']})"
+                    f"  - [{article['publisher']}] {article['title']}"
                 )
+                if published:
+                    lines.append(f"    Published: {published}")
+                if teaser:
+                    lines.append(f"    Summary: {teaser[:300]}")
+                if article.get("link"):
+                    lines.append(f"    Link: {article['link']}")
         lines.append("")
     return "\n".join(lines)
 
@@ -272,7 +430,7 @@ async def get_portfolio_transactions():
 
 @router.get("/news")
 async def get_portfolio_news():
-    """Aggregate recent news headlines for all portfolio holdings."""
+    """Aggregate recent premium news for all portfolio holdings."""
     holdings = portfolio_manager.get_holdings()
     if not holdings:
         return {"holdings_news": []}
@@ -290,7 +448,7 @@ async def get_portfolio_news_status():
 @router.post("/news/analyze")
 async def analyze_portfolio_news():
     """Generate an AI-written portfolio-wide news impact report."""
-    portfolio_news_task_status["status"] = "Fetching recent news..."
+    portfolio_news_task_status["status"] = "Fetching premium news..."
     holdings = portfolio_manager.get_holdings()
     if not holdings:
         portfolio_news_task_status["status"] = "No news found."

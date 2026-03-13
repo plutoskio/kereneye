@@ -6,16 +6,21 @@ import copy
 from datetime import datetime, timedelta
 
 import pandas as pd
+import requests
 import yfinance as yf
+
+from config import BENZINGA_API_KEY, MASSIVE_API_KEY
 
 
 INFO_TTL = timedelta(seconds=60)
 NEWS_TTL = timedelta(minutes=5)
 HISTORY_TTL = timedelta(minutes=5)
 DOWNLOAD_TTL = timedelta(minutes=5)
+PREMIUM_NEWS_TTL = timedelta(minutes=15)
 
 _info_cache: dict[str, tuple[datetime, dict]] = {}
 _news_cache: dict[tuple[str, int | None], tuple[datetime, list]] = {}
+_premium_news_cache: dict[tuple[str, int | None, int], tuple[datetime, list]] = {}
 _history_cache: dict[tuple[str, str], tuple[datetime, pd.DataFrame]] = {}
 _download_cache: dict[tuple[tuple[str, ...], tuple[tuple[str, str], ...]], tuple[datetime, pd.DataFrame | pd.Series]] = {}
 
@@ -50,6 +55,29 @@ def _clone_news(news_items: list) -> list:
 
 def _clone_info(info: dict) -> dict:
     return dict(info)
+
+
+def _dedupe_news_items(news_items: list[dict]) -> list[dict]:
+    seen_titles: set[str] = set()
+    unique_items: list[dict] = []
+
+    for item in news_items:
+        title = (item.get("title") or "").strip()
+        if not title:
+            continue
+
+        title_key = title.casefold()
+        if title_key in seen_titles:
+            continue
+
+        seen_titles.add(title_key)
+        unique_items.append(item)
+
+    return unique_items
+
+
+def _sort_news_by_published(news_items: list[dict]) -> list[dict]:
+    return sorted(news_items, key=lambda item: item.get("published", ""), reverse=True)
 
 
 def get_ticker(symbol: str):
@@ -168,6 +196,93 @@ def get_batch_ticker_news(symbols, limit: int | None = None) -> dict[str, list]:
             results[symbol] = get_ticker_news(symbol, limit=limit)
 
     return results
+
+
+def get_premium_ticker_news(symbol: str, limit: int | None = None, days: int = 7) -> list[dict]:
+    """Return cached premium news items for a ticker from Benzinga and Polygon."""
+    symbol = _normalize_symbol(symbol)
+    cache_key = (symbol, limit, days)
+    cached = _premium_news_cache.get(cache_key)
+    if cached and _is_fresh(cached[0], PREMIUM_NEWS_TTL):
+        return _clone_news(cached[1])
+
+    end_date = datetime.now()
+    start_date = end_date - timedelta(days=days)
+    start_str = start_date.strftime("%Y-%m-%d")
+    end_str = end_date.strftime("%Y-%m-%d")
+
+    news_items: list[dict] = []
+
+    if BENZINGA_API_KEY and BENZINGA_API_KEY != "your_benzinga_api_key_here":
+        try:
+            url = (
+                "https://api.benzinga.com/api/v2/news"
+                f"?token={BENZINGA_API_KEY}"
+                f"&tickers={symbol}"
+                f"&dateFrom={start_str}"
+                f"&dateTo={end_str}"
+            )
+            response = requests.get(url, timeout=5)
+            if response.status_code == 200:
+                for article in response.json():
+                    news_items.append(
+                        {
+                            "title": article.get("title", ""),
+                            "publisher": "Benzinga",
+                            "link": article.get("url", ""),
+                            "published": article.get("created", ""),
+                            "teaser": article.get("teaser", ""),
+                        }
+                    )
+        except Exception:
+            pass
+
+    if MASSIVE_API_KEY and MASSIVE_API_KEY != "your_massive_api_key_here":
+        try:
+            url = (
+                "https://api.polygon.io/v2/reference/news"
+                f"?ticker={symbol}"
+                f"&published_utc.gte={start_str}"
+                f"&limit={limit or 20}"
+                f"&apiKey={MASSIVE_API_KEY}"
+            )
+            response = requests.get(url, timeout=5)
+            if response.status_code == 200:
+                for article in response.json().get("results", []):
+                    publisher_name = article.get("publisher", {}).get("name", "")
+                    if "yahoo" in publisher_name.lower():
+                        continue
+
+                    news_items.append(
+                        {
+                            "title": article.get("title", ""),
+                            "publisher": publisher_name,
+                            "link": article.get("article_url", ""),
+                            "published": article.get("published_utc", ""),
+                            "teaser": article.get("description", ""),
+                        }
+                    )
+        except Exception:
+            pass
+
+    news_items = _sort_news_by_published(_dedupe_news_items(news_items))
+    if limit is not None:
+        news_items = news_items[:limit]
+
+    _premium_news_cache[cache_key] = (_now(), news_items)
+    return _clone_news(news_items)
+
+
+def get_batch_premium_ticker_news(symbols, limit: int | None = None, days: int = 7) -> dict[str, list[dict]]:
+    """Return premium news items for multiple tickers from Benzinga and Polygon."""
+    normalized = _normalize_symbols(symbols)
+    if not normalized:
+        return {}
+
+    return {
+        symbol: get_premium_ticker_news(symbol, limit=limit, days=days)
+        for symbol in normalized
+    }
 
 
 def get_price_history(symbol: str, period: str) -> pd.DataFrame:

@@ -22,11 +22,10 @@ from config import (
     FRED_SERIES,
     MAX_PEERS,
     PRICE_HISTORY_PERIOD,
-    BENZINGA_API_KEY,
-    MASSIVE_API_KEY,
 )
 from services.market_data_service import (
     get_batch_ticker_info,
+    get_premium_ticker_news,
     get_price_history,
     get_ticker,
     get_ticker_info,
@@ -542,84 +541,12 @@ class DataCollector:
     def _fetch_premium_news(self, data: CompanyData) -> None:
         """Fetch recent news from Benzinga and Polygon, avoiding Yahoo Finance."""
         print("📡 Fetching premium news (Benzinga/Polygon)...")
-        
-        # Determine the date range (last 7 days)
-        end_date = datetime.now()
-        start_date = end_date - timedelta(days=7)
-        
-        start_str = start_date.strftime("%Y-%m-%d")
-        end_str = end_date.strftime("%Y-%m-%d")
-
-        news_items = []
-
-        # 1. Fetch from Benzinga
-        if BENZINGA_API_KEY and BENZINGA_API_KEY != "your_benzinga_api_key_here":
-            try:
-                url = f"https://api.benzinga.com/api/v2/news?token={BENZINGA_API_KEY}&tickers={data.ticker}&dateFrom={start_str}&dateTo={end_str}"
-                response = requests.get(url, timeout=5)
-                if response.status_code == 200:
-                    articles = response.json()
-                    for article in articles:
-                        # Append unique articles
-                        if not any(a.get("title") == article.get("title") for a in news_items):
-                            news_items.append({
-                                "title": article.get("title", ""),
-                                "publisher": "Benzinga",
-                                "link": article.get("url", ""),
-                                "published": article.get("created", ""),
-                                "teaser": article.get("teaser", "")
-                            })
-                    print(f"  ✅ Benzinga: {len(articles)} articles found.")
-                else:
-                    data.errors.append(f"Benzinga API failed with status {response.status_code}")
-                    print(f"  ⚠ Benzinga failed: {response.status_code}")
-            except Exception as e:
-                data.errors.append(f"Benzinga news fetch failed: {e}")
-                print(f"  ⚠ Benzinga failed: {e}")
-        else:
-            print("  ⚠ Skipped Benzinga (No API Key)")
-
-        # 2. Fetch from Polygon (Massive)
-        if MASSIVE_API_KEY and MASSIVE_API_KEY != "your_massive_api_key_here":
-            try:
-                # Polygon rate limit is 5 / min. Wrap in try/except for 429
-                url = f"https://api.polygon.io/v2/reference/news?ticker={data.ticker}&published_utc.gte={start_str}&limit=20&apiKey={MASSIVE_API_KEY}"
-                response = requests.get(url, timeout=5)
-                
-                if response.status_code == 200:
-                    articles = response.json().get("results", [])
-                    added_polygon_count = 0
-                    for article in articles:
-                        publisher_name = article.get("publisher", {}).get("name", "")
-                        # Explicitly filter out Yahoo Finance if it slips in via aggregators
-                        if "yahoo" in publisher_name.lower():
-                            continue
-                            
-                        # Avoid exact title duplicates from Benzinga
-                        if not any(a.get("title") == article.get("title") for a in news_items):
-                            news_items.append({
-                                "title": article.get("title", ""),
-                                "publisher": publisher_name,
-                                "link": article.get("article_url", ""),
-                                "published": article.get("published_utc", ""),
-                                "teaser": article.get("description", "")
-                            })
-                            added_polygon_count += 1
-                    print(f"  ✅ Polygon: {added_polygon_count} articles added.")
-                elif response.status_code == 429:
-                    print("  ⚠ Polygon: Rate limited (429). Falling back to Benzinga data only.")
-                else:
-                    data.errors.append(f"Polygon API failed with status {response.status_code}")
-                    print(f"  ⚠ Polygon failed: {response.status_code}")
-            except Exception as e:
-                data.errors.append(f"Polygon news fetch failed: {e}")
-                print(f"  ⚠ Polygon failed: {e}")
-        else:
-            print("  ⚠ Skipped Polygon (No API Key)")
-            
-        # Sort combined news generically by published date descending (newest first)
-        news_items.sort(key=lambda x: x.get("published", ""), reverse=True)
-        data.recent_news = news_items
+        try:
+            data.recent_news = get_premium_ticker_news(data.ticker, limit=20, days=7)
+            print(f"  ✅ Premium news: {len(data.recent_news)} articles collected")
+        except Exception as e:
+            data.errors.append(f"Premium news fetch failed: {e}")
+            print(f"  ⚠ Premium news failed: {e}")
 
 # ---------------------------------------------------------------------------
 # Formatting helpers (used by agents to read data)

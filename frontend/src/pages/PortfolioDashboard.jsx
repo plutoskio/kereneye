@@ -59,6 +59,8 @@ export default function PortfolioDashboard() {
   // Holdings news
   const [holdingsNews, setHoldingsNews] = useState([]);
   const [loadingNews, setLoadingNews] = useState(false);
+  const [hasLoadedNews, setHasLoadedNews] = useState(false);
+  const [newsError, setNewsError] = useState(null);
   const [portfolioNewsReport, setPortfolioNewsReport] = useState(null);
   const [loadingNewsReport, setLoadingNewsReport] = useState(false);
 
@@ -145,15 +147,21 @@ export default function PortfolioDashboard() {
   const fetchHoldingsNews = useCallback(async () => {
     if (holdings.length === 0) {
       setHoldingsNews([]);
+      setHasLoadedNews(false);
+      setNewsError(null);
       return;
     }
     setLoadingNews(true);
     try {
+      setNewsError(null);
       setHoldingsNews(await getPortfolioNews());
     } catch (err) {
       console.error('Failed to fetch holdings news:', err);
+      setHoldingsNews([]);
+      setNewsError(err.message || 'Failed to fetch premium news.');
     } finally {
       setLoadingNews(false);
+      setHasLoadedNews(true);
     }
   }, [holdings.length]);
 
@@ -278,6 +286,23 @@ export default function PortfolioDashboard() {
     return `${Math.floor(secs / 3600)}h ago`;
   };
 
+  const formatPctMove = (value) => {
+    if (value === null || value === undefined) return 'N/A';
+    return `${value >= 0 ? '+' : ''}${value.toFixed(2)}%`;
+  };
+
+  const formatNewsDate = (value) => {
+    if (!value) return 'Date unavailable';
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return value;
+    return parsed.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  };
+
+  const moveToneClass = (value) => {
+    if (value === null || value === undefined) return 'text-altruistGray-400 bg-altruistGray-100';
+    return value >= 0 ? 'text-green-700 bg-green-50' : 'text-red-700 bg-red-50';
+  };
+
   // ---------------------------------------------------------------
   // Derived data
   // ---------------------------------------------------------------
@@ -288,6 +313,7 @@ export default function PortfolioDashboard() {
         color: SECTOR_COLORS[i % SECTOR_COLORS.length],
       }))
     : [];
+  const visibleHoldingsNews = holdingsNews.filter((holdingNews) => (holdingNews.news || []).length > 0);
 
   const isEmpty = !loadingHoldings && holdings.length === 0;
 
@@ -569,7 +595,7 @@ export default function PortfolioDashboard() {
               )}
 
               {/* HOLDINGS NEWS */}
-              {holdingsNews.length > 0 && (
+              {holdings.length > 0 && (
                 <div className="panel-structured overflow-hidden">
                   <div className="border-b border-altruistGray-200 px-6 py-4 bg-altruistGray-50 flex items-center justify-between">
                     <h3 className="text-[13px] font-bold text-altruistGray-800 uppercase tracking-wide flex items-center gap-2">
@@ -578,7 +604,7 @@ export default function PortfolioDashboard() {
                     <div className="flex items-center gap-2">
                       <button
                         onClick={generateAiNewsReport}
-                        disabled={loadingNewsReport || holdingsNews.length === 0}
+                        disabled={loadingNewsReport || visibleHoldingsNews.length === 0}
                         className="text-[10px] font-bold text-altruistBlue uppercase tracking-widest hover:text-blue-800 transition-colors disabled:opacity-50 flex items-center gap-1 bg-altruistBlue/10 px-2.5 py-1 rounded-sm"
                       >
                         {loadingNewsReport ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
@@ -612,30 +638,97 @@ export default function PortfolioDashboard() {
                     </div>
                   )}
 
-                  <div className="divide-y divide-altruistGray-100 max-h-[500px] overflow-y-auto custom-scrollbar">
-                    {holdingsNews.map((hn) =>
-                      hn.news.map((article, j) => (
-                        <a
-                          key={`${hn.ticker}-${j}`}
-                          href={article.link}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="flex items-start gap-4 px-6 py-3 hover:bg-altruistGray-50 transition-colors group"
-                        >
-                          <span className="text-[11px] font-mono font-bold text-altruistBlue bg-altruistBlue/10 px-2 py-0.5 rounded-sm mt-0.5 shrink-0">
-                            {hn.ticker}
-                          </span>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-[13px] font-medium text-altruistGray-800 truncate group-hover:text-altruistBlue transition-colors">
-                              {article.title}
-                            </p>
-                            <p className="text-[11px] text-altruistGray-400 mt-0.5">{article.publisher}</p>
+                  {!hasLoadedNews ? (
+                    <div className="p-6 space-y-3">
+                      {[...Array(3)].map((_, i) => (
+                        <div key={i} className="skeleton h-24 w-full rounded-sm" />
+                      ))}
+                    </div>
+                  ) : newsError ? (
+                    <div className="px-6 py-10 text-center">
+                      <Newspaper className="w-7 h-7 text-red-300 mx-auto mb-3" />
+                      <p className="text-[13px] font-medium text-red-600">Premium news feed unavailable.</p>
+                      <p className="text-[11px] text-altruistGray-400 mt-1">{newsError}</p>
+                    </div>
+                  ) : hasLoadedNews && visibleHoldingsNews.length === 0 ? (
+                    <div className="px-6 py-10 text-center">
+                      <Newspaper className="w-7 h-7 text-altruistGray-300 mx-auto mb-3" />
+                      <p className="text-[13px] font-medium text-altruistGray-600">No premium news in the last 7 days.</p>
+                      <p className="text-[11px] text-altruistGray-400 mt-1">
+                        This feed only shows Benzinga and Polygon coverage for your current holdings.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="max-h-[500px] overflow-y-auto custom-scrollbar divide-y divide-altruistGray-100">
+                      {visibleHoldingsNews.map((hn) => {
+                        const priceContext = hn.price_context || {};
+
+                        return (
+                          <div key={hn.ticker} className="px-6 py-4">
+                            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                              <div>
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span className="text-[11px] font-mono font-bold text-altruistBlue bg-altruistBlue/10 px-2 py-0.5 rounded-sm">
+                                    {hn.ticker}
+                                  </span>
+                                  <span className="text-[11px] text-altruistGray-400 uppercase tracking-widest">
+                                    {hn.news_count} article{hn.news_count === 1 ? '' : 's'}
+                                  </span>
+                                </div>
+                                <p className="text-[11px] text-altruistGray-400 mt-1">
+                                  Last close {priceContext.last_close !== null && priceContext.last_close !== undefined
+                                    ? `$${priceContext.last_close.toFixed(2)}`
+                                    : 'unavailable'}
+                                  {priceContext.last_close_date ? ` · ${formatNewsDate(priceContext.last_close_date)}` : ''}
+                                </p>
+                              </div>
+                              <div className="flex flex-wrap gap-2">
+                                <span className={`text-[10px] font-bold uppercase tracking-widest px-2 py-1 rounded-sm ${moveToneClass(priceContext.one_day_change_pct)}`}>
+                                  1D {formatPctMove(priceContext.one_day_change_pct)}
+                                </span>
+                                <span className={`text-[10px] font-bold uppercase tracking-widest px-2 py-1 rounded-sm ${moveToneClass(priceContext.five_day_change_pct)}`}>
+                                  5D {formatPctMove(priceContext.five_day_change_pct)}
+                                </span>
+                                <span className={`text-[10px] font-bold uppercase tracking-widest px-2 py-1 rounded-sm ${moveToneClass(priceContext.since_first_article_change_pct)}`}>
+                                  Since News {formatPctMove(priceContext.since_first_article_change_pct)}
+                                </span>
+                              </div>
+                            </div>
+
+                            <div className="mt-4 divide-y divide-altruistGray-100 border border-altruistGray-100 rounded-sm overflow-hidden">
+                              {hn.news.map((article, j) => (
+                                <a
+                                  key={`${hn.ticker}-${j}`}
+                                  href={article.link}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="flex items-start gap-4 px-4 py-3 hover:bg-altruistGray-50 transition-colors group"
+                                >
+                                  <div className="flex-1 min-w-0">
+                                    <p className="text-[13px] font-medium text-altruistGray-800 group-hover:text-altruistBlue transition-colors">
+                                      {article.title}
+                                    </p>
+                                    <div className="flex flex-wrap items-center gap-2 mt-1">
+                                      <p className="text-[11px] text-altruistGray-400">{article.publisher}</p>
+                                      {article.published && (
+                                        <p className="text-[11px] text-altruistGray-300">{formatNewsDate(article.published)}</p>
+                                      )}
+                                    </div>
+                                    {article.teaser && (
+                                      <p className="text-[12px] text-altruistGray-500 mt-1 line-clamp-2">
+                                        {article.teaser}
+                                      </p>
+                                    )}
+                                  </div>
+                                  <ExternalLink className="w-3.5 h-3.5 text-altruistGray-300 shrink-0 mt-0.5 opacity-0 group-hover:opacity-100 transition-opacity" />
+                                </a>
+                              ))}
+                            </div>
                           </div>
-                          <ExternalLink className="w-3.5 h-3.5 text-altruistGray-300 shrink-0 mt-0.5 opacity-0 group-hover:opacity-100 transition-opacity" />
-                        </a>
-                      ))
-                    )}
-                  </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
